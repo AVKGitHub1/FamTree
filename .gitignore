@@ -1,0 +1,36 @@
+archive/
+example/
+HANDOFF.md
+STATUS.md
+node_modules/
+venv/
+.venv/
+uploads-flat/
+__pycache__/
+*.pyc
+*.db
+*.db.bak*
+uploads/
+*.log
+.vite/
+dist/
+**/.backup/
+*.bak
+*.bak.*
+HANDOFF.md.bak
+
+.env
+/data
+docker-compose.yml
+run-local.bat
+
+# Disposable scratch
+/tmp
+/todos
+
+# Local source recordings, workspace exports, debugging inputs and render output.
+/artifacts/*
+!/artifacts/README.md
+
+# Local assistant environment and working rules
+/CLAUDE.md
