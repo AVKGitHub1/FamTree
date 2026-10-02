@@ -28,7 +28,7 @@ The data for this container should be stored under ```~/data/FamTree``` and shou
 
 ### Node
 
-Each node of this tree represents a person. Each person has some attributes. 
+Each node of this tree represents a person. Each person has some attributes.
 
 #### Connection attributes
 
