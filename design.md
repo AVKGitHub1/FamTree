@@ -21,8 +21,7 @@ Framework, database, and graph-layout library selection are implementation decis
 
 - Use a configurable host port, with `18765` as the proposed default. No port can be guaranteed unused; if it is occupied, fail with a clear instruction to select another port.
 - Mount the expanded host path `~/data/FamTree` into the container at `/data`. Container replacement or restart must preserve people, relationships, attribute definitions, credentials, and settings.
-- Serve an owned subdomain over HTTPS through a reverse proxy. DNS points the subdomain to the server; the proxy accepts HTTPS on port `443` and forwards requests to the application port. A DNS record alone does not map a hostname to an arbitrary HTTP port.
-- When the proxy runs on the same host, bind the published application port to loopback. A proxy in a separate container can reach the app over a private Docker network. Keep direct application access off the public internet and document proxy, certificate, and port configuration.
+- Serve over a local port. DNS points the subdomain to the port via cloudfared.
 - Provide a health check and graceful shutdown. A readiness check must fail if storage cannot be opened or decrypted.
 
 ### Encryption and recovery
@@ -46,7 +45,7 @@ Framework, database, and graph-layout library selection are implementation decis
 
 ### Code permissions and sessions
 
-Use whole-tree roles for the initial version; permissions are not scoped to individual people or attributes.
+Use whole-tree roles; permissions are not scoped to individual people or attributes.
 
 | Role | Read public data | Read private data | Edit family data and attribute definitions | Manage codes and admin settings |
 | --- | --- | --- | --- | --- |
@@ -89,7 +88,7 @@ A public viewer code grants the same data access as a guest. Revoking a code rem
 The family tree is a graph: multiple parents and spouses mean it is not necessarily a strict mathematical tree.
 
 - Store a parent-child relationship once, with parent ID, child ID, a mother/father role, and visibility. Derive the child's parent list and the parent's child list from the same relationship.
-- Treat all parent links equally. The initial version does not distinguish biological, adoptive, step, or guardian relationships; every parent link counts in relation calculations.
+- Treat all parent links equally. Do not distinguish biological, adoptive, step, or guardian relationships; every parent link counts in relation calculations.
 - Allow multiple mother and father relationships for a child. Mother/father is a role on a particular relationship, not a limit on the number of parents or an inference from the person's name.
 - Store a spouse relationship once as an unordered pair of person IDs plus visibility. Allow multiple spouses without requiring that they share children.
 - Do not infer that two parents are spouses, that a parent's spouse is also a parent, or that spouses share every child. Draw each child from their explicitly recorded parent relationships.
@@ -157,7 +156,6 @@ All controls, person selection, and relation selection must work with keyboard n
 - Treat the order explicitly: report “A is B's …” so ancestor, descendant, aunt/uncle, and niece/nephew results are unambiguous.
 - Handle the same person, direct ancestors/descendants, siblings, aunt/uncle and niece/nephew relationships, and direct spouses as named cases. Do not force these into cousin notation. A recorded shared parent is enough to identify siblings; missing parent data must not be interpreted as evidence of a half-sibling relationship.
 - For a shared ancestor at parent-link distances `a` and `b`, where both are at least 2, cousin degree is `min(a, b) - 1` and removals are `abs(a - b)`. For example, `(2, 2)` means first cousins and `(2, 4)` means first cousins twice removed.
-- Do not traverse spouse edges to manufacture cousin relationships. General in-law relationship naming is outside the initial calculation scope; direct spouses are supported.
 - Multiple ancestry paths are possible. Deduplicate equivalent results and show multiple distinct closest ancestry results instead of silently choosing an arbitrary path. Define “closest” by the lowest total number of parent links through a common ancestor, with ties retained. A spouse result can coexist with an ancestry result.
 - Explain the selected result using a visible relationship path. If there is no eligible path, say “No relationship found in the available data,” without asserting that the people are unrelated or disclosing hidden connections.
 
