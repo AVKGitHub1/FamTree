@@ -117,6 +117,7 @@ Edits and deletions must preserve graph validity and required public connections
 - Multiple parents and spouses can create conflicting generation constraints. Prioritize parent-above-child placement and clearly route exceptional connections when all same-row preferences cannot hold. Do not alter family data to simplify the drawing.
 - Keep placement deterministic for the same graph and preserve the selected person and viewport when possible after an edit.
 - Include empty, loading, error, and no-visible-results states. Guests seeing an empty tree cannot create its first person.
+- add support for dark, light, sepia themes
 
 ### Connection lines
 
