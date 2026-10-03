@@ -11,6 +11,8 @@ from test_pictures import add_person, upload
 from famtree import clock
 from famtree.daily import DailySnapshots
 from famtree.domain import repository, snapshots
+from famtree.storage import migrations
+from famtree.storage.bootstrap import open_storage
 
 
 @pytest.fixture
@@ -128,6 +130,81 @@ def test_loading_saves_the_current_tree_first_and_leaves_access_alone(server, ad
     assert admin.post(f"/api/admin/snapshots/{saved['id']}/load").status_code == 200
     assert names(admin) == {"Founder", "Renamed"}
     assert [s["kind"] for s in listed(admin)].count("before_load") == 2
+
+
+def test_bringing_back_a_deleted_person_refuses_edits_from_before(admin, db):
+    created = admin.post(
+        "/api/changes",
+        {
+            "people": [{"ref": "p", "name": "Partner"}, {"ref": "q", "name": "Other"}],
+            "spouse_links": [{"a": {"ref": "p"}, "b": {"ref": "q"}, "is_public": True}],
+        },
+    )
+    assert created.status_code == 201, created.text
+    p = created.json()["created"]["p"]
+    DailySnapshots(db).run_once()
+    [old] = listed(admin)
+
+    # Edit forms left open on Partner and their marriage, which (by cascade)
+    # end up deleted with a revision above anything left in the tree.
+    assert edit(admin, p, "Partner").status_code == 200
+    form = person(admin, p)
+    for _ in range(2):
+        [link] = admin.tree()["spouse_links"]
+        changed = admin.patch(
+            f"/api/relationships/spouse/{link['id']}",
+            {"expected_revision": link["revision"], "is_public": True},
+        )
+        assert changed.status_code == 200, changed.text
+    [link] = admin.tree()["spouse_links"]
+    preview = admin.get(f"/api/people/{p}/deletion").json()
+    deleted = admin.delete(
+        f"/api/people/{p}",
+        params={
+            "expected_revision": form["revision"],
+            "expected_relationships": preview["relationships"],
+        },
+    )
+    assert deleted.status_code == 200, deleted.text
+
+    assert admin.post(f"/api/admin/snapshots/{old['id']}/load").status_code == 200
+    assert names(admin) == {"Partner", "Other"}
+    stale_person = admin.put(
+        f"/api/people/{p}",
+        {"expected_revision": form["revision"], "name": "Overwritten", "attributes": []},
+    )
+    assert stale_person.status_code == 409
+    stale_link = admin.patch(
+        f"/api/relationships/spouse/{link['id']}",
+        {"expected_revision": link["revision"], "is_public": True},
+    )
+    assert stale_link.status_code == 409
+    assert names(admin) == {"Partner", "Other"}
+
+
+def test_upgrading_keeps_snapshots_loadable_and_remembers_deleted_revisions(settings, monkeypatch):
+    with monkeypatch.context() as old_release:
+        old_release.setattr(migrations, "MIGRATIONS", migrations.MIGRATIONS[:3])
+        old_release.setattr(migrations, "SCHEMA_VERSION", 3)
+        old_release.setattr(snapshots, "SCHEMA_VERSION", 3)
+        database = open_storage(settings).database
+        with database.write() as conn:
+            person_id = repository.insert_person(conn, "Before Upgrade")
+            snapshot_id = snapshots.take(conn, snapshots.SnapshotKind.DAILY)
+        database.close()
+
+    database = open_storage(settings).database
+    try:
+        with database.write() as conn:
+            assert migrations.current_version(conn) == migrations.SCHEMA_VERSION
+            assert [s.loadable for s in snapshots.list_snapshots(conn)] == [True]
+            repository.touch_person(conn, person_id)
+            repository.touch_person(conn, person_id)
+            repository.delete_person(conn, person_id)
+            snapshots.load(conn, snapshot_id)
+            assert repository.person_revision(conn, person_id) == 4  # above the deleted 3
+    finally:
+        database.close()
 
 
 def test_snapshots_keep_their_pictures(admin, db, today):

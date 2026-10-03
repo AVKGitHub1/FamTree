@@ -9,7 +9,9 @@ import { ValueInput } from "./ValueInput";
 interface Props {
   rows: AttributeRow[];
   definitions: Map<string, AttributeDefinition>;
-  onChange: (rows: AttributeRow[]) => void;
+  /** Receives an update to apply to the rows as they are by then: a picture
+   * upload finishes after other edits, which it must not undo. */
+  onChange: (update: (rows: AttributeRow[]) => AttributeRow[]) => void;
 }
 
 const NEW = "__new__";
@@ -23,14 +25,13 @@ export function AttributeRows({ rows, definitions, onChange }: Props) {
 
   const used = new Set(rows.flatMap((r) => ("id" in r.definition ? [r.definition.id] : [])));
   const available = [...definitions.values()].filter((d) => !used.has(d.id));
+  // A row removed meanwhile stays removed.
   const update = (key: string, patch: Partial<AttributeRow>) =>
-    onChange(rows.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+    onChange((current) => current.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  const append = (row: AttributeRow) => onChange((current) => [...current, row]);
 
   const addExisting = (definition: AttributeDefinition) => {
-    onChange([
-      ...rows,
-      { key: localKey(), definition: { id: definition.id }, draft: draftFrom(definition.value_type, null), isPublic: false },
-    ]);
+    append({ key: localKey(), definition: { id: definition.id }, draft: draftFrom(definition.value_type, null), isPublic: false });
     setAdding("");
   };
 
@@ -38,10 +39,7 @@ export function AttributeRows({ rows, definitions, onChange }: Props) {
     const label = newLabel.trim();
     if (!label) return;
     const ref = localKey("def");
-    onChange([
-      ...rows,
-      { key: localKey(), definition: { ref, label, value_type: newType }, draft: draftFrom(newType, null), isPublic: false },
-    ]);
+    append({ key: localKey(), definition: { ref, label, value_type: newType }, draft: draftFrom(newType, null), isPublic: false });
     setAdding("");
     setNewLabel("");
   };
@@ -56,7 +54,7 @@ export function AttributeRows({ rows, definitions, onChange }: Props) {
             <button
               type="button"
               className="link-button"
-              onClick={() => onChange(rows.filter((r) => r.key !== row.key))}
+              onClick={() => onChange((current) => current.filter((r) => r.key !== row.key))}
               aria-label={`Remove ${rowLabel(row, definitions)}`}
             >
               Remove

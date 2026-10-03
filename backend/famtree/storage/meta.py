@@ -9,6 +9,8 @@ INITIALIZED_AT = "initialized_at"
 ADMIN_PASSWORD_HASH = "admin_password_hash"
 ADMIN_PASSWORD_CHANGED_AT = "admin_password_changed_at"
 GUEST_ACCESS = "guest_access"
+# The highest revision any deleted tree record had (kept up by triggers).
+RETIRED_REVISION = "retired_revision"
 
 
 def get(conn: Connection, key: str) -> str | None:

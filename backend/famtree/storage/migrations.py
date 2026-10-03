@@ -53,6 +53,23 @@ def _add_pictures(conn: Connection) -> None:
     )
 
 
+def _remember_deleted_revisions(conn: Connection) -> None:
+    """Version 4: the highest revision of any deleted record, kept in `meta`
+    and so outside the tree: loading a snapshot can bring a deleted record
+    back, and must give it a revision above any it had (see snapshots.load).
+    Triggers also catch deletions by cascade, and by loading a snapshot."""
+    conn.execute("INSERT INTO meta (key, value) VALUES ('retired_revision', '0')")
+    for table in ("attribute_definitions", "people", "parent_links", "spouse_links"):
+        # A single statement: _split_statements would cut a trigger body apart.
+        conn.execute(
+            f"CREATE TRIGGER {table}_retire AFTER DELETE ON {table} BEGIN "
+            "UPDATE meta SET value = max(CAST(value AS INTEGER), OLD.revision) "
+            "WHERE key = 'retired_revision'; END"
+        )
+    # The tree is stored as before, so earlier snapshots stay loadable.
+    conn.execute("UPDATE snapshots SET schema_version = 4 WHERE schema_version = 3")
+
+
 # Each entry upgrades the schema by one version: SQL statements, or a function
 # for steps SQL alone cannot express. Never edit a released entry; append a new
 # one instead.
@@ -177,6 +194,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     );
     CREATE INDEX snapshot_images_image ON snapshot_images(image_id);
     """,
+    _remember_deleted_revisions,
 )
 
 SCHEMA_VERSION = len(MIGRATIONS)

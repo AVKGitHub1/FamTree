@@ -206,7 +206,7 @@ with it.
   of snapshots and stay as they are. Attribute and relationship visibility
   does return to the snapshot's values along with the family data. Anyone
   editing from a page that still shows the replaced tree is told it changed
-  and to reload.
+  and to reload, also for a person deleted since and brought back by the load.
 - The tree saved before a load may be empty; loading that saved snapshot
   returns to the empty tree. If loading the oldest snapshot when 20 are
   already kept, saving the current tree can remove that oldest list entry;
@@ -319,7 +319,7 @@ docker compose up -d --build    # rebuilds and restarts; schema migrations run o
 Migrations only move forward. A newer database is refused by an older
 release, so you never silently lose data by downgrading.
 
-An upgrade that changes the database layout leaves earlier
+An upgrade that changes how the tree itself is stored leaves earlier
 [snapshots](#snapshots) listed but no longer loadable, because they were taken
 with the old layout; keep the backup taken before upgrading to go back that
 far. The first upgrade to a release with snapshots creates the snapshot

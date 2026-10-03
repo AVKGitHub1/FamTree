@@ -26,6 +26,7 @@ from famtree import clock
 from famtree.domain import repository
 from famtree.domain.errors import InvalidInput, NotFound
 from famtree.security.tokens import new_id
+from famtree.storage import meta
 from famtree.storage.database import Connection
 from famtree.storage.migrations import SCHEMA_VERSION
 
@@ -225,18 +226,16 @@ def load(conn: Connection, snapshot_id: str) -> str:
     # replaced. Unused pictures are cleaned up only once it is in place.
     saved = take(conn, SnapshotKind.BEFORE_LOAD)
 
-    # Every loaded record gets a revision above any in use, so a browser still
-    # showing the replaced tree gets a conflict on its next edit instead of
-    # saving over the loaded tree.
-    in_use = [
-        conn.execute(f"SELECT coalesce(max(revision), 0) FROM {table}").fetchone()[0]
-        for table in _REVISED
-    ]
-    loaded = [record["revision"] for table in _REVISED for record in tree[table]]
-    revision = 1 + max(in_use + loaded)
-
     for table in reversed(TREE_TABLES):
         conn.execute(f"DELETE FROM {table}")
+    # Every loaded record gets a revision above any a record has had, deleted
+    # ones included (the delete triggers keep the highest, the replaced tree's
+    # too), so a browser still showing an earlier tree gets a conflict on its
+    # next edit instead of saving over the loaded tree.
+    retired = int(meta.get(conn, meta.RETIRED_REVISION) or 0)
+    loaded = [record["revision"] for table in _REVISED for record in tree[table]]
+    revision = 1 + max([retired, *loaded])
+
     for table in TREE_TABLES:
         columns = [r["name"] for r in conn.execute(f"PRAGMA table_info({table})")]
         insert = (
