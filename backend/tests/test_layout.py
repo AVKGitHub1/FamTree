@@ -8,7 +8,7 @@ from builders import GraphBuilder, sample_family
 
 from famtree.domain.visibility import Audience, authorize
 from famtree.layout import compute_layout
-from famtree.layout.types import ConnectorType
+from famtree.layout.types import Connector, ConnectorType, Crossing
 
 
 def rows(layout):
@@ -85,6 +85,108 @@ def test_unmarried_and_multiple_parents_use_a_labelled_junction():
     family = next(c for c in layout.connectors if c.type is ConnectorType.FAMILY)
     assert family.junction is not None
     assert not any(c.type is ConnectorType.SPOUSE for c in layout.connectors)
+
+
+def test_each_child_has_its_own_drop_from_the_bus():
+    g = GraphBuilder()
+    mum, dad = g.people("Mum", "Dad")
+    g.spouse(mum, dad)
+    kids = g.people("A", "B", "C")
+    for kid in kids:
+        g.parents(kid, dad, mum)
+    lone = g.person("Lone")
+    g.parents(lone, *g.people("P", "Q"))
+    g.spouse("p", "q")
+    layout = compute_layout(g.build())
+    families = {c.people[-1]: c for c in layout.connectors if c.type is ConnectorType.FAMILY}
+
+    family = families[kids[-1]]
+    assert set(family.drops) == set(kids)
+    (x1, bus_y), (x2, y2) = family.paths[family.bus]
+    assert bus_y == y2 and x1 < x2
+    trunk_x, trunk_y = family.paths[family.trunk][-1]
+    assert trunk_y == bus_y and x1 <= trunk_x <= x2
+    for kid, i in family.drops.items():
+        node = layout.nodes[kid]
+        assert family.paths[i] == [
+            (node.x + node.width / 2, bus_y),
+            (node.x + node.width / 2, node.y),
+        ]
+
+    # Children left out lose their drops; the bus spans the rest and the trunk.
+    a, b, c = kids
+    part = family.visible_part({mum, dad, a, b})
+    assert set(part.drops) == {a, b} and len(part.paths) == len(family.paths) - 1
+    assert family.paths[family.drops[c]] not in part.paths
+    xs = [trunk_x] + [family.paths[family.drops[kid]][0][0] for kid in (a, b)]
+    assert part.paths[part.bus] == [(min(xs), bus_y), (max(xs), bus_y)]
+    assert all(min(xs) < x < max(xs) and x in xs for x, _ in part.dots)
+    assert family.visible_part({mum, dad}) is None  # no child shown
+    assert family.visible_part({mum, a, b, c}) is None  # half of a couple
+
+    # An only child straight below its parents' spouse line has no bus.
+    single = families[lone]
+    assert (single.bus, single.trunk, single.drops) == (None, None, {})
+    assert len(single.paths) == 1
+
+
+def test_a_crossing_is_kept_only_where_both_lines_still_run():
+    family = Connector(
+        "f",
+        ConnectorType.FAMILY,
+        ["m", "a", "b"],
+        [],
+        paths=[
+            [(50, 0), (50, 10)],
+            [(0, 10), (100, 10)],
+            [(0, 10), (0, 20)],
+            [(100, 10), (100, 20)],
+        ],
+        dots=[(50, 10)],
+        bus=1,
+        trunk=0,
+        drops={"a": 2, "b": 3},
+    )
+    other = Connector(
+        "g", ConnectorType.FAMILY, ["x"], [], paths=[[(20, 0), (20, 30)], [(80, 0), (80, 30)]]
+    )
+    near, far = Crossing(20, 10, "g", "f"), Crossing(80, 10, "g", "f")
+    everyone = {"m", "a", "b", "x"}
+    assert near.visible({"f": family, "g": other}, everyone)
+    assert far.visible({"f": family, "g": other}, everyone)
+    part = family.visible_part({"m", "a", "x"})
+    assert part.paths[part.bus] == [(0, 10), (50, 10)] and part.dots == []
+    assert near.visible({"f": part, "g": other}, everyone - {"b"})
+    assert not far.visible({"f": part, "g": other}, everyone - {"b"})
+    assert not near.visible({"g": other}, everyone)  # the family is not drawn at all
+
+
+def test_junction_branches_can_be_left_out_one_parent_at_a_time():
+    g = GraphBuilder()
+    a, b, c = g.people("A", "B", "C")
+    child = g.person("Child")
+    g.parent(a, child)
+    g.parent(b, child, "mother")
+    g.parent(c, child, "mother")
+    layout = compute_layout(g.build())
+    family = next(c for c in layout.connectors if c.type is ConnectorType.FAMILY)
+    assert set(family.branches) == {a, b, c}
+    for parent, index in family.branches.items():
+        assert family.paths[index][0][1] == layout.nodes[parent].y + layout.nodes[parent].height
+
+    part = family.visible_part({b, c, child})
+    assert part is not None and set(part.branches) == {b, c}
+    assert len(part.paths) == len(family.paths) - 1
+    assert family.paths[family.branches[a]] not in part.paths
+    assert part.junction == family.junction and part.dots == family.dots
+    drops = {kid: family.paths[i] for kid, i in family.drops.items()}
+    assert {kid: part.paths[i] for kid, i in part.drops.items()} == drops
+    if family.bus is not None:
+        assert part.paths[part.bus] == family.paths[family.bus]
+        assert part.paths[part.trunk] == family.paths[family.trunk]
+    assert family.visible_part({child}) is None  # no parent shown
+    assert family.visible_part({a, b, c}) is None  # no child shown
+    assert family.visible_part({a, b, c, child}) is family
 
 
 def test_conflicting_generation_constraints_keep_parents_above_children():

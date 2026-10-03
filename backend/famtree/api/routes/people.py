@@ -49,13 +49,28 @@ def deletion_preview(
 ) -> dict:
     graph = state.views.graph(Audience.FULL)
     preview = changes.preview_person_deletion(graph, person_id)
+
+    def ref(pid: str) -> dict:
+        return {"id": pid, "name": graph.people[pid].name}
+
+    # The dialog lists these, not its own copy of the tree, so what the editor
+    # reviews is exactly what `relationships` stands for.
     return {
         "allowed": preview.allowed,
-        "parent_links": preview.parent_links,
-        "spouse_links": preview.spouse_links,
-        "blocked_people": [
-            {"id": pid, "name": graph.people[pid].name} for pid in preview.blocked_people
+        "relationships": preview.relationships,
+        "parent_links": [
+            {
+                "id": link.id,
+                "parent": ref(link.parent_id),
+                "child": ref(link.child_id),
+                "role": link.role.value,
+            }
+            for link in preview.parent_links
         ],
+        "spouse_links": [
+            {"id": link.id, "spouse": ref(link.other(person_id))} for link in preview.spouse_links
+        ],
+        "blocked_people": [ref(pid) for pid in preview.blocked_people],
     }
 
 
@@ -63,9 +78,10 @@ def deletion_preview(
 def delete_person(
     person_id: str,
     expected_revision: int = Query(),
+    expected_relationships: str = Query(max_length=64),
     _: Viewer = Depends(editor),
     db: Database = Depends(get_db),
 ) -> dict:
     with db.write() as conn:
-        changes.delete_person(conn, person_id, expected_revision)
+        changes.delete_person(conn, person_id, expected_revision, expected_relationships)
     return {"ok": True}

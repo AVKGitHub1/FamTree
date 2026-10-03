@@ -1,4 +1,4 @@
-"""Admin-only: password change, guest access and access-code management."""
+"""Admin-only: password change, guest access, access codes and tree snapshots."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from famtree.api import serializers
 from famtree.api.deps import get_db, require
 from famtree.api.routes.auth import InvalidCredentials
 from famtree.api.schemas import CodeCreate, CodeUpdate, PasswordChange, SettingsUpdate
+from famtree.domain import snapshots
 from famtree.domain.errors import InvalidInput
 from famtree.security import access_codes, sessions
 from famtree.security.passwords import hash_password, validate_new_password, verify_password
@@ -119,4 +120,31 @@ def delete_code(
     with db.write() as conn:
         access_codes.delete_code(conn, code_id)
     log.info("Access code %s deleted", code_id)
+    return {"ok": True}
+
+
+@router.get("/snapshots")
+def list_snapshots(_: Viewer = Depends(admin_only), db: Database = Depends(get_db)) -> dict:
+    with db.read() as conn:
+        found = snapshots.list_snapshots(conn)
+    return {"snapshots": [serializers.snapshot(s) for s in found], "keep": snapshots.KEEP}
+
+
+@router.post("/snapshots/{snapshot_id}/load")
+def load_snapshot(
+    snapshot_id: str, _: Viewer = Depends(admin_only), db: Database = Depends(get_db)
+) -> dict:
+    with db.write() as conn:
+        saved = snapshots.load(conn, snapshot_id)
+    log.info("Snapshot %s loaded; the tree it replaced is saved as snapshot %s", snapshot_id, saved)
+    return {"saved": saved}
+
+
+@router.delete("/snapshots/{snapshot_id}")
+def delete_snapshot(
+    snapshot_id: str, _: Viewer = Depends(admin_only), db: Database = Depends(get_db)
+) -> dict:
+    with db.write() as conn:
+        snapshots.delete(conn, snapshot_id)
+    log.info("Snapshot %s deleted", snapshot_id)
     return {"ok": True}

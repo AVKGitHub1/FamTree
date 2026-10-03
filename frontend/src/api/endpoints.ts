@@ -14,7 +14,9 @@ import type {
   RelationOutcome,
   SearchHit,
   Session,
+  Snapshot,
   TreeData,
+  UploadedPicture,
   ValueType,
 } from "./types";
 
@@ -55,8 +57,18 @@ export const updatePerson = (
 export const getDeletionPreview = (id: string) =>
   request<DeletionPreview>("GET", `/api/people/${q(id)}/deletion`);
 
-export const deletePerson = (id: string, revision: number) =>
-  request<{ ok: true }>("DELETE", `/api/people/${q(id)}?expected_revision=${revision}`);
+export const uploadPicture = (picture: Blob) => request<UploadedPicture>("POST", "/api/images", picture);
+
+/** A person's profile picture; `imageId` changes the URL when the picture changes. */
+export const pictureUrl = (personId: string, imageId: string, size: "thumb" | "full") =>
+  `/api/people/${q(personId)}/picture?size=${size}&v=${q(imageId)}`;
+
+/** `relationships` comes from the deletion preview the editor reviewed. */
+export const deletePerson = (id: string, revision: number, relationships: string) =>
+  request<{ ok: true }>(
+    "DELETE",
+    `/api/people/${q(id)}?expected_revision=${revision}&expected_relationships=${q(relationships)}`,
+  );
 
 export const updateParentLink = (
   id: string,
@@ -103,5 +115,11 @@ export const revealCode = (id: string) =>
 export const updateCode = (id: string, body: { label?: string; role?: CodeRole; revoked?: boolean }) =>
   request<{ ok: true }>("PATCH", `/api/admin/codes/${q(id)}`, body);
 export const deleteCode = (id: string) => request<{ ok: true }>("DELETE", `/api/admin/codes/${q(id)}`);
+/** Newest first; `keep` is how many are kept before the oldest is deleted. */
+export const listSnapshots = () => request<{ snapshots: Snapshot[]; keep: number }>("GET", "/api/admin/snapshots");
+/** Replace the tree with the snapshot's; the current tree is saved as a snapshot first. */
+export const loadSnapshot = (id: string) =>
+  request<{ saved: string }>("POST", `/api/admin/snapshots/${q(id)}/load`);
+export const deleteSnapshot = (id: string) => request<{ ok: true }>("DELETE", `/api/admin/snapshots/${q(id)}`);
 export const changePassword = (current_password: string, new_password: string) =>
   request<{ ok: true }>("POST", "/api/admin/password", { current_password, new_password });

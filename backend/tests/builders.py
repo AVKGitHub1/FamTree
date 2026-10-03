@@ -22,6 +22,7 @@ BUILTIN_DEFINITIONS = {
     "description": AttributeDefinition(
         "description", 4, "Description", ValueType.LONG_TEXT, True, 1
     ),
+    "profile_pic": AttributeDefinition("profile_pic", 5, "Profile Pic", ValueType.IMAGE, True, 1),
 }
 
 

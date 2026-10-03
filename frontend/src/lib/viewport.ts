@@ -67,3 +67,17 @@ export function boundsOf(boxes: Box[]): Box | null {
   }
   return { x: x1, y: y1, width: x2 - x1, height: y2 - y1 };
 }
+
+/** The box spanned by two corner points. */
+export function boxBetween(a: { x: number; y: number }, b: { x: number; y: number }): Box {
+  return { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), width: Math.abs(a.x - b.x), height: Math.abs(a.y - b.y) };
+}
+
+/** A box in screen pixels expressed in tree coordinates. */
+export function toTree(t: Transform, box: Box): Box {
+  return { x: (box.x - t.x) / t.k, y: (box.y - t.y) / t.k, width: box.width / t.k, height: box.height / t.k };
+}
+
+export function overlaps(a: Box, b: Box): boolean {
+  return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+}

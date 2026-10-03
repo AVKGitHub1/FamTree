@@ -18,6 +18,7 @@ from famtree.api.errors import install_error_handlers
 from famtree.api.routes import api_router
 from famtree.api.state import AppState
 from famtree.config import Settings
+from famtree.daily import DailySnapshots
 from famtree.storage.bootstrap import (
     StorageUnavailable,
     acquire_lock,
@@ -75,9 +76,14 @@ def start_storage(state: AppState) -> None:
     if opened.bootstrap_password:
         print_bootstrap_password(opened.bootstrap_password)
     log.info("Storage ready (%s)", settings.db_path)
+    state.daily_snapshots = DailySnapshots(opened.database)
+    state.daily_snapshots.start()
 
 
 def stop_storage(state: AppState) -> None:
+    if state.daily_snapshots is not None:
+        state.daily_snapshots.stop()
+        state.daily_snapshots = None
     if state.database is not None:
         state.database.close()
         state.database = None

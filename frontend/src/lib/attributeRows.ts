@@ -1,4 +1,5 @@
-import type { AttributeDefinition, AttributeInput, NewDefinition, Person, ValueType } from "../api/types";
+import { pictureUrl } from "../api/endpoints";
+import type { AttributeDefinition, AttributeInput, ImageValue, NewDefinition, Person, ValueType } from "../api/types";
 import { draftFrom, parseDraft, type Draft } from "./drafts";
 
 /** One attribute being edited: an existing definition or one created here. */
@@ -20,7 +21,11 @@ export function rowsFromPerson(person: Person, definitions: Map<string, Attribut
       {
         key: localKey(),
         definition: { id: def.id },
-        draft: draftFrom(def.value_type, attr.value),
+        draft: draftFrom(
+          def.value_type,
+          attr.value,
+          def.value_type === "image" ? pictureUrl(person.id, (attr.value as ImageValue).id, "thumb") : null,
+        ),
         isPublic: attr.is_public ?? false,
       },
     ];

@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ApiError } from "../../api/client";
 import * as api from "../../api/endpoints";
 import type { DeletionPreview } from "../../api/types";
-import { nameOf, spouseOther, type TreeIndex } from "../../lib/treeIndex";
+import type { TreeIndex } from "../../lib/treeIndex";
 import { useToast } from "../../state/toasts";
 import { useTree } from "../../state/tree";
 import { Dialog } from "../ui/Dialog";
@@ -15,7 +15,9 @@ interface Props {
 }
 
 /** Shows which relationships go with the person, and refuses deletions that
- * would leave someone without a public relationship. */
+ * would leave someone without a public relationship. The list comes from the
+ * server's preview, and the deletion is bound to it: if someone changes these
+ * relationships meanwhile, the list is refreshed for review instead. */
 export function DeleteDialog({ index, personId, onClose, onDeleted }: Props) {
   const { reload } = useTree();
   const notify = useToast();
@@ -24,27 +26,41 @@ export function DeleteDialog({ index, personId, onClose, onDeleted }: Props) {
   const [busy, setBusy] = useState(false);
   const person = index.people.get(personId);
 
+  const check = useCallback(
+    () =>
+      api.getDeletionPreview(personId).then(setPreview, (err) =>
+        setError(err instanceof ApiError ? err.message : "Could not check this deletion."),
+      ),
+    [personId],
+  );
   useEffect(() => {
-    api.getDeletionPreview(personId).then(setPreview, (err) =>
-      setError(err instanceof ApiError ? err.message : "Could not check this deletion."),
-    );
-  }, [personId]);
+    check();
+  }, [check]);
 
-  const descriptions = [
-    ...(index.parentsOf.get(personId) ?? []).map((l) => `${nameOf(index, l.parent_id)} is their ${l.role}`),
-    ...(index.childrenOf.get(personId) ?? []).map((l) => `parent (${l.role}) of ${nameOf(index, l.child_id)}`),
-    ...(index.spousesOf.get(personId) ?? []).map((l) => `spouse of ${nameOf(index, spouseOther(l, personId))}`),
-  ];
+  const descriptions = preview
+    ? [
+        ...preview.parent_links.map((l) =>
+          l.child.id === personId ? `${l.parent.name} is their ${l.role}` : `parent (${l.role}) of ${l.child.name}`,
+        ),
+        ...preview.spouse_links.map((l) => `spouse of ${l.spouse.name}`),
+      ]
+    : [];
 
   const remove = async () => {
+    if (!preview) return;
     setBusy(true);
     try {
-      await api.deletePerson(personId, person?.revision ?? 0);
+      await api.deletePerson(personId, person?.revision ?? 0, preview.relationships);
       await reload();
       notify(`${person?.name ?? "Person"} was deleted.`, "success");
       onDeleted();
     } catch (err) {
+      const stale = err instanceof ApiError && err.isStale;
       setError(err instanceof ApiError ? err.message : "Could not delete.");
+      if (stale) {
+        setPreview(null);
+        await Promise.all([check(), reload()]);
+      }
       setBusy(false);
     }
   };
@@ -76,8 +92,8 @@ export function DeleteDialog({ index, personId, onClose, onDeleted }: Props) {
             <>
               <p>These relationships will be removed too:</p>
               <ul>
-                {descriptions.map((text) => (
-                  <li key={text}>{text}</li>
+                {descriptions.map((text, i) => (
+                  <li key={i}>{text}</li>
                 ))}
               </ul>
             </>

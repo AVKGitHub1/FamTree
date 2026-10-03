@@ -18,11 +18,14 @@ MAX_TEXT = 300
 MAX_LONG_TEXT = 4000
 MAX_URL = 2000
 
-# Built-in definitions created by the first migration.
+# Built-in definitions created by the migrations.
 BIRTH_DATE = "birth_date"
 LOCATION = "location"
 PROFESSION = "profession"
 DESCRIPTION = "description"
+PROFILE_PIC = "profile_pic"
+
+_IMAGE_ID = re.compile(r"[0-9a-f]{16}")
 
 
 class ValueType(StrEnum):
@@ -31,6 +34,8 @@ class ValueType(StrEnum):
     DATE = "date"
     NUMBER = "number"
     URL = "url"
+    # Only the built-in Profile Pic: a reference to a stored picture.
+    IMAGE = "image"
 
 
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
@@ -89,7 +94,20 @@ def normalize_value(value_type: ValueType, raw: Any) -> Any:
             if parts.scheme.lower() not in ("http", "https") or not parts.netloc:
                 raise InvalidInput("Links must start with http:// or https://.")
             return text
+        case ValueType.IMAGE:
+            # Whether the picture exists is checked against the database.
+            image_id = raw.get("id") if isinstance(raw, dict) and len(raw) == 1 else None
+            if not isinstance(image_id, str) or not _IMAGE_ID.fullmatch(image_id):
+                raise InvalidInput("Upload a picture.")
+            return {"id": image_id}
     raise InvalidInput(f"Unknown value type {value_type!r}.")
+
+
+def custom_type_problem(value_type: ValueType) -> str | None:
+    """Why editors may not give their own attributes this type, if they may not."""
+    if value_type is ValueType.IMAGE:
+        return "Pictures are kept only in the built-in Profile Pic attribute."
+    return None
 
 
 def display_text(value_type: ValueType, value: Any) -> str:
@@ -98,6 +116,8 @@ def display_text(value_type: ValueType, value: Any) -> str:
         return PartialDate.from_json(value).format()
     if value_type is ValueType.NUMBER:
         return f"{value:g}" if isinstance(value, float) else str(value)
+    if value_type is ValueType.IMAGE:
+        return "picture"
     return str(value)
 
 

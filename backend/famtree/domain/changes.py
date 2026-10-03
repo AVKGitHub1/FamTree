@@ -3,12 +3,14 @@ the resulting graph before commit, so a rejected change leaves nothing behind.""
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from typing import Any
 
 from famtree.domain import repository as repo
 from famtree.domain.attributes import (
     ValueType,
+    custom_type_problem,
     normalize_label,
     normalize_name,
     normalize_value,
@@ -116,6 +118,8 @@ def _create_definitions(conn: Connection, items: list[NewDefinition], resolver: 
         if item.ref in resolver.definitions:
             raise InvalidInput(f"Duplicate attribute reference {item.ref!r}.")
         label = normalize_label(item.label)
+        if problem := custom_type_problem(item.value_type):
+            raise InvalidInput(problem)
         if repo.label_in_use(conn, label):
             raise Conflict(f"An attribute named “{label}” already exists; choose it instead.")
         resolver.definitions[item.ref] = repo.insert_definition(conn, label, item.value_type)
@@ -150,6 +154,8 @@ def update_definition(
     if new_type != current.value_type:
         if current.builtin:
             raise InvalidInput("The type of a built-in attribute cannot be changed.")
+        if problem := custom_type_problem(new_type):
+            raise InvalidInput(problem)
         problem = type_change_problem(
             current.value_type, new_type, repo.values_for_definition(conn, definition_id)
         )
@@ -194,6 +200,10 @@ def _attribute_values(
             value = normalize_value(definition.value_type, item.value)
         except InvalidInput as exc:
             raise InvalidInput(f"{definition.label}: {exc.message}") from None
+        if definition.value_type is ValueType.IMAGE and not repo.image_exists(conn, value["id"]):
+            raise InvalidInput(
+                f"{definition.label}: that picture is no longer available. Upload it again."
+            )
         values.append(AttributeValue(definition_id, value, bool(item.is_public)))
     return values
 
@@ -236,6 +246,7 @@ def apply_changes(conn: Connection, changes: ChangeSet) -> dict[str, str]:
         _add_spouse_link(conn, a, b, link.is_public)
 
     validate_graph(repo.load_graph(conn))
+    repo.delete_unused_images(conn)
     return resolver.people
 
 
@@ -285,17 +296,32 @@ def update_person(
     values = _attribute_values(conn, attributes, resolver)
     repo.touch_person(conn, person_id, normalize_name(name))
     repo.replace_attribute_values(conn, person_id, values)
+    repo.delete_unused_images(conn)
 
 
 @dataclass(frozen=True)
 class DeletionPreview:
-    parent_links: list[str]
-    spouse_links: list[str]
+    parent_links: list[ParentLink]
+    spouse_links: list[SpouseLink]
     blocked_people: list[str]
+    # Identifies exactly the relationships listed, for `delete_person`.
+    relationships: str
 
     @property
     def allowed(self) -> bool:
         return not self.blocked_people
+
+
+def relationships_token(graph: FamilyGraph, person_id: str) -> str:
+    """Fingerprint of a person's relationships (which ones, at which revision).
+    A person's own revision does not change when a relationship is added, so
+    deletion is also bound to this: it removes only what the preview listed."""
+    parent_links = graph.parent_links_of(person_id) + graph.child_links_of(person_id)
+    parts = sorted(
+        [f"p:{link.id}:{link.revision}" for link in parent_links]
+        + [f"s:{link.id}:{link.revision}" for link in graph.spouse_links_of(person_id)]
+    )
+    return hashlib.sha256("|".join(parts).encode()).hexdigest()[:32]
 
 
 def preview_person_deletion(graph: FamilyGraph, person_id: str) -> DeletionPreview:
@@ -312,18 +338,25 @@ def preview_person_deletion(graph: FamilyGraph, person_id: str) -> DeletionPrevi
         definitions=graph.definitions,
     )
     return DeletionPreview(
-        parent_links=[
-            link.id for link in graph.parent_links_of(person_id) + graph.child_links_of(person_id)
-        ],
-        spouse_links=[link.id for link in graph.spouse_links_of(person_id)],
+        parent_links=graph.parent_links_of(person_id) + graph.child_links_of(person_id),
+        spouse_links=graph.spouse_links_of(person_id),
         blocked_people=people_without_public_connection(remaining),
+        relationships=relationships_token(graph, person_id),
     )
 
 
-def delete_person(conn: Connection, person_id: str, expected_revision: int) -> None:
+def delete_person(
+    conn: Connection, person_id: str, expected_revision: int, expected_relationships: str
+) -> None:
     _check_person_revision(conn, person_id, expected_revision)
+    if relationships_token(repo.load_graph(conn), person_id) != expected_relationships:
+        raise StaleRevision(
+            "This person's relationships changed after the deletion was checked. "
+            "Review the updated list, then delete again."
+        )
     repo.delete_person(conn, person_id)
     validate_graph(repo.load_graph(conn))
+    repo.delete_unused_images(conn)
 
 
 # --- relationships -----------------------------------------------------------

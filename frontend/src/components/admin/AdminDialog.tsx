@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiError } from "../../api/client";
 import * as api from "../../api/endpoints";
-import type { AccessCode, CodeRole } from "../../api/types";
+import type { AccessCode, CodeRole, Snapshot, SnapshotKind } from "../../api/types";
 import { useToast } from "../../state/toasts";
+import { useTree } from "../../state/tree";
 import { Dialog } from "../ui/Dialog";
 
 const ROLE_OPTIONS: [CodeRole, string, string][] = [
@@ -14,7 +15,7 @@ const ROLE_OPTIONS: [CodeRole, string, string][] = [
 const errorText = (err: unknown) => (err instanceof ApiError ? err.message : "Something went wrong.");
 
 export function AdminDialog({ onClose }: { onClose: () => void }) {
-  const [tab, setTab] = useState<"codes" | "guests" | "password">("codes");
+  const [tab, setTab] = useState<"codes" | "guests" | "snapshots" | "password">("codes");
   return (
     <Dialog title="Admin" size="wide" onClose={onClose}>
       <div className="tabs" role="tablist" aria-label="Admin sections">
@@ -24,11 +25,22 @@ export function AdminDialog({ onClose }: { onClose: () => void }) {
         <button type="button" role="tab" aria-selected={tab === "guests"} onClick={() => setTab("guests")}>
           Guest access
         </button>
+        <button type="button" role="tab" aria-selected={tab === "snapshots"} onClick={() => setTab("snapshots")}>
+          Snapshots
+        </button>
         <button type="button" role="tab" aria-selected={tab === "password"} onClick={() => setTab("password")}>
           Admin password
         </button>
       </div>
-      {tab === "codes" ? <CodesPanel /> : tab === "guests" ? <GuestsPanel /> : <PasswordPanel />}
+      {tab === "codes" ? (
+        <CodesPanel />
+      ) : tab === "guests" ? (
+        <GuestsPanel />
+      ) : tab === "snapshots" ? (
+        <SnapshotsPanel />
+      ) : (
+        <PasswordPanel />
+      )}
     </Dialog>
   );
 }
@@ -270,6 +282,162 @@ function GuestsPanel() {
         </span>
       </label>
     </fieldset>
+  );
+}
+
+const KIND_LABELS: Record<SnapshotKind, string> = {
+  daily: "Daily",
+  before_load: "Saved before a load",
+};
+
+const when = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { dateStyle: "medium" });
+const kilobytes = (bytes: number) =>
+  bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+
+function SnapshotsPanel() {
+  const notify = useToast();
+  const { index, reload } = useTree();
+  const [snapshots, setSnapshots] = useState<Snapshot[] | null>(null);
+  const [keep, setKeep] = useState<number | null>(null);
+  const [confirm, setConfirm] = useState<{ snapshot: Snapshot; action: "load" | "delete" } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const list = useCallback(
+    () =>
+      api.listSnapshots().then(
+        (r) => {
+          setSnapshots(r.snapshots);
+          setKeep(r.keep);
+        },
+        (err) => notify(errorText(err), "error"),
+      ),
+    [notify],
+  );
+
+  useEffect(() => {
+    list();
+  }, [list]);
+
+  const run = async (action: () => Promise<unknown>, message: string) => {
+    setBusy(true);
+    try {
+      await action();
+      setConfirm(null);
+      notify(message, "success");
+    } catch (err) {
+      notify(errorText(err), "error");
+    } finally {
+      setBusy(false);
+      await list();
+    }
+  };
+
+  const load = (snapshot: Snapshot) =>
+    run(async () => {
+      await api.loadSnapshot(snapshot.id);
+      await reload();
+    }, `Loaded the tree from ${when(snapshot.taken_at)}. The tree it replaced is saved as a snapshot.`);
+
+  return (
+    <div className="snapshots">
+      <p className="hint">
+        Each day FamTree keeps a snapshot of the tree if it has changed since the last one; on a day without changes the
+        latest snapshot is renewed instead.{keep != null && ` The latest ${keep} are kept; taking another deletes the oldest.`}{" "}
+        Snapshots hold people, their details and pictures, and relationships. Access codes, guest access and the admin
+        password are not part of them and stay as they are when you load one.
+      </p>
+
+      {confirm?.action === "load" && (
+        <div className="confirm" role="alertdialog" aria-label="Load this snapshot?">
+          <p>
+            Replace the current tree{index ? ` (${index.people.size} people)` : ""} with the one from{" "}
+            <strong>{when(confirm.snapshot.taken_at)}</strong> ({confirm.snapshot.people} people)? The current tree is
+            saved as a snapshot first, so you can load it again to go back.
+          </p>
+          <button type="button" className="button button--primary" disabled={busy} onClick={() => load(confirm.snapshot)}>
+            {busy ? "Loading…" : "Load snapshot"}
+          </button>
+          <button type="button" className="button" disabled={busy} onClick={() => setConfirm(null)}>
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {snapshots === null ? (
+        <p>Loading…</p>
+      ) : snapshots.length === 0 ? (
+        <p className="muted">No snapshots yet. The first is taken on the first day the tree has someone in it.</p>
+      ) : (
+        <table className="snapshots__table">
+          <thead>
+            <tr>
+              <th scope="col">Taken</th>
+              <th scope="col">Kind</th>
+              <th scope="col">People</th>
+              <th scope="col">Relationships</th>
+              <th scope="col">Size</th>
+              <th scope="col">
+                <span className="sr-only">Actions</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {snapshots.map((snapshot) => (
+              <tr key={snapshot.id}>
+                <td>
+                  {when(snapshot.taken_at)}
+                  {day(snapshot.first_taken) !== day(snapshot.taken_at) && (
+                    <span className="hint">unchanged since {day(snapshot.first_taken)}</span>
+                  )}
+                </td>
+                <td>{KIND_LABELS[snapshot.kind]}</td>
+                <td>{snapshot.people}</td>
+                <td>{snapshot.relationships}</td>
+                <td>{kilobytes(snapshot.size)}</td>
+                <td className="codes__actions">
+                  {confirm?.action === "delete" && confirm.snapshot.id === snapshot.id ? (
+                    <>
+                      <button
+                        type="button"
+                        className="link-button link-button--danger"
+                        disabled={busy}
+                        onClick={() => run(() => api.deleteSnapshot(snapshot.id), "Snapshot deleted.")}
+                      >
+                        Confirm delete
+                      </button>
+                      <button type="button" className="link-button" onClick={() => setConfirm(null)}>
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className="link-button"
+                        disabled={!snapshot.loadable || busy}
+                        title={snapshot.loadable ? undefined : "Taken by a different version of FamTree; it cannot be loaded."}
+                        onClick={() => setConfirm({ snapshot, action: "load" })}
+                      >
+                        Load
+                      </button>
+                      <button
+                        type="button"
+                        className="link-button link-button--danger"
+                        disabled={busy}
+                        onClick={() => setConfirm({ snapshot, action: "delete" })}
+                      >
+                        Delete
+                      </button>
+                    </>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
   );
 }
 

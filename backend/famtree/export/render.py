@@ -16,6 +16,7 @@ gi.require_version("PangoCairo", "1.0")
 from gi.repository import Pango, PangoCairo  # noqa: E402
 
 from famtree.domain.errors import InvalidInput  # noqa: E402
+from famtree.domain.pictures import FULL_SIZE, square_crop  # noqa: E402
 from famtree.export.options import (  # noqa: E402
     MIN_LEGIBLE_PT,
     MIN_LEGIBLE_PX,
@@ -32,9 +33,11 @@ from famtree.export.scene import (  # noqa: E402
     LEGEND_HEIGHT,
     NAME_LINE,
     NAME_SIZE,
+    PICTURE_SIZE,
     TEXT_LINE,
     TEXT_SIZE,
     Scene,
+    SceneCard,
 )
 from famtree.layout.types import Connector, ConnectorType  # noqa: E402
 
@@ -45,6 +48,7 @@ CARD_FILL = (0.96, 0.97, 0.99)
 CARD_STROKE = (0.36, 0.42, 0.55)
 PAPER = (1.0, 1.0, 1.0)
 MUTED = (0.35, 0.38, 0.45)
+PLACEHOLDER = (0.88, 0.90, 0.95)
 LINE_WIDTH = 1.6
 SPOUSE_OUTER = 4.4
 SPOUSE_INNER = 1.4
@@ -91,6 +95,16 @@ class _Painter:
             self._layouts[key] = layout
         return self._layouts[key]
 
+    def _set(self, text: str, width: float, size: float, bold: bool) -> Pango.Layout:
+        layout = self._layout(size, bold)
+        layout.set_width(int(width * Pango.SCALE))
+        layout.set_text(text, -1)  # plain text: never interpreted as markup
+        PangoCairo.update_layout(self.ctx, layout)
+        return layout
+
+    def fits(self, text: str, width: float, size: float, bold: bool = False) -> bool:
+        return not self._set(text, width, size, bold).is_ellipsized()
+
     def text(
         self,
         text: str,
@@ -102,13 +116,10 @@ class _Painter:
         color=INK,
         center: bool = False,
     ) -> None:
-        layout = self._layout(size, bold)
-        layout.set_width(int(width * Pango.SCALE))
+        layout = self._set(text, width, size, bold)
         layout.set_alignment(Pango.Alignment.CENTER if center else Pango.Alignment.LEFT)
-        layout.set_text(text, -1)  # plain text: never interpreted as markup
         self.ctx.set_source_rgb(*color)
         self.ctx.move_to(x, y)
-        PangoCairo.update_layout(self.ctx, layout)
         PangoCairo.show_layout(self.ctx, layout)
 
     def rounded_rect(self, x: float, y: float, w: float, h: float, r: float) -> None:
@@ -119,6 +130,48 @@ class _Painter:
         ctx.arc(x + r, y + h - r, r, math.pi / 2, math.pi)
         ctx.arc(x + r, y + r, r, math.pi, 3 * math.pi / 2)
         ctx.close_path()
+
+    def picture(self, surface: cairo.ImageSurface, x: float, y: float, size: float) -> None:
+        """`surface` drawn as a circle of diameter `size`."""
+        ctx = self.ctx
+        ctx.save()
+        ctx.new_path()
+        ctx.arc(x + size / 2, y + size / 2, size / 2, 0, 2 * math.pi)
+        ctx.clip()
+        ctx.translate(x, y)
+        ctx.scale(size / surface.get_width(), size / surface.get_height())
+        ctx.set_source_surface(surface, 0, 0)
+        ctx.get_source().set_filter(cairo.FILTER_GOOD)
+        ctx.paint()
+        ctx.restore()
+        self._ring(x, y, size)
+
+    def initials(self, name: str, x: float, y: float, size: float) -> None:
+        ctx = self.ctx
+        ctx.new_path()
+        ctx.arc(x + size / 2, y + size / 2, size / 2, 0, 2 * math.pi)
+        ctx.set_source_rgb(*PLACEHOLDER)
+        ctx.fill()
+        self._ring(x, y, size)
+        text_size = size * 0.36
+        self.text(
+            _initials(name),
+            x,
+            y + (size - text_size * 1.3) / 2,
+            size,
+            text_size,
+            bold=True,
+            color=MUTED,
+            center=True,
+        )
+
+    def _ring(self, x: float, y: float, size: float) -> None:
+        ctx = self.ctx
+        ctx.new_path()
+        ctx.arc(x + size / 2, y + size / 2, size / 2, 0, 2 * math.pi)
+        ctx.set_source_rgb(*CARD_STROKE)
+        ctx.set_line_width(0.8)
+        ctx.stroke()
 
     def polyline(self, points) -> None:
         self.ctx.move_to(*points[0])
@@ -143,7 +196,54 @@ class _Painter:
             ctx.stroke()
 
 
-def _paint_scene(painter: _Painter, scene: Scene) -> None:
+def _initials(name: str) -> str:
+    words = name.split()
+    letters = [words[0][0], words[-1][0]] if len(words) > 1 else [name[:1]]
+    return "".join(letters).upper()
+
+
+def _picture_surface(jpeg: bytes, pixels: int, embed_jpeg: bool) -> cairo.ImageSurface:
+    image = square_crop(jpeg, pixels)
+    side = image.width
+    surface = cairo.ImageSurface.create_for_data(
+        bytearray(image.tobytes("raw", "BGRX")), cairo.FORMAT_RGB24, side, side, side * 4
+    )
+    if embed_jpeg:  # a PDF then contains the JPEG itself rather than raw pixels
+        buffer = io.BytesIO()
+        image.save(buffer, "JPEG", quality=88)
+        surface.set_mime_data(cairo.MIME_TYPE_JPEG, buffer.getvalue())
+    return surface
+
+
+def _paint_card(
+    painter: _Painter, scene: Scene, card: SceneCard, density: float, pdf: bool
+) -> None:
+    """`density`: output pixels per scene unit, for sizing pictures."""
+    ctx = painter.ctx
+    painter.rounded_rect(card.x, card.y, card.width, card.height, 9)
+    ctx.set_source_rgb(*CARD_FILL)
+    ctx.fill_preserve()
+    ctx.set_source_rgb(*CARD_STROKE)
+    ctx.set_line_width(1.2)
+    ctx.stroke()
+    if scene.pictures:
+        x, y = card.x + CARD_PAD, card.y + CARD_PAD
+        if card.picture is None:
+            painter.initials(card.name, x, y, PICTURE_SIZE)
+        else:
+            pixels = max(16, min(FULL_SIZE, math.ceil(PICTURE_SIZE * density)))
+            surface = _picture_surface(card.picture, pixels, embed_jpeg=pdf)
+            painter.picture(surface, x, y, PICTURE_SIZE)
+            surface.finish()
+    left = card.x + CARD_PAD + scene.text_inset
+    inner = card.width - 2 * CARD_PAD - scene.text_inset
+    painter.text(card.name, left, card.y + CARD_PAD, inner, NAME_SIZE, bold=True)
+    for i, line in enumerate(card.lines):
+        y = card.y + CARD_PAD + NAME_LINE + i * TEXT_LINE
+        painter.text(line, left, y, inner, TEXT_SIZE, color=MUTED)
+
+
+def _paint_scene(painter: _Painter, scene: Scene, density: float, pdf: bool) -> None:
     ctx = painter.ctx
     by_id = {c.id: c for c in scene.connectors}
     for connector in scene.connectors:
@@ -178,17 +278,7 @@ def _paint_scene(painter: _Painter, scene: Scene) -> None:
             painter.text("parents", j.x - j.width / 2, j.y - 6.5, j.width, 9.0, center=True)
 
     for card in scene.cards:
-        painter.rounded_rect(card.x, card.y, card.width, card.height, 9)
-        ctx.set_source_rgb(*CARD_FILL)
-        ctx.fill_preserve()
-        ctx.set_source_rgb(*CARD_STROKE)
-        ctx.set_line_width(1.2)
-        ctx.stroke()
-        inner = card.width - 2 * CARD_PAD
-        painter.text(card.name, card.x + CARD_PAD, card.y + CARD_PAD, inner, NAME_SIZE, bold=True)
-        for i, line in enumerate(card.lines):
-            y = card.y + CARD_PAD + NAME_LINE + i * TEXT_LINE
-            painter.text(line, card.x + CARD_PAD, y, inner, TEXT_SIZE, color=MUTED)
+        _paint_card(painter, scene, card, density, pdf)
 
     if scene.legend:
         _paint_legend(painter, scene)
@@ -201,7 +291,7 @@ def _paint_legend(painter: _Painter, scene: Scene) -> None:
     entries = {
         "spouse": "Spouses",
         "parent": "Parent and child",
-        "junction": "Shared parents, no recorded marriage",
+        "junction": "Joins parents to their shared children",
     }
     for key in scene.legend:
         mid = y + LEGEND_HEIGHT / 2
@@ -218,6 +308,22 @@ def _paint_legend(painter: _Painter, scene: Scene) -> None:
             painter.stroke_connector_path(fake, [(x, mid), (x + 34, mid)])
         painter.text(entries[key], x + 42, mid - 7.5, 260, 10.0, color=MUTED)
         x += 42 + (130 if key != "junction" else 240)
+
+
+def shortened_cards(scene: Scene) -> int:
+    """How many cards have a name or value cut short to fit. Cards keep their
+    width at every output size, so a larger resolution does not change this."""
+    surface = cairo.ImageSurface(cairo.FORMAT_RGB24, 1, 1)
+    painter = _Painter(cairo.Context(surface))
+    count = 0
+    for card in scene.cards:
+        inner = card.width - 2 * CARD_PAD - scene.text_inset
+        if not painter.fits(card.name, inner, NAME_SIZE, bold=True) or not all(
+            painter.fits(line, inner, TEXT_SIZE) for line in card.lines
+        ):
+            count += 1
+    surface.finish()
+    return count
 
 
 def _png_size(scene: Scene, width_px: int) -> tuple[int, float]:
@@ -243,19 +349,25 @@ def _fit_page(scene: Scene, options: ExportOptions) -> tuple[float, float, float
     return page_w, page_h, scale, ox, oy
 
 
-def _draw(surface, scene: Scene, scale: float, ox: float, oy: float) -> None:
+# Pictures in a PDF get this many pixels per point (about 216 dpi), for print.
+PDF_PICTURE_DENSITY = 3.0
+
+
+def _draw(
+    surface, scene: Scene, scale: float, ox: float, oy: float, density: float, pdf: bool = False
+) -> None:
     ctx = cairo.Context(surface)
     ctx.set_source_rgb(*PAPER)
     ctx.paint()
     ctx.translate(ox, oy)
     ctx.scale(scale, scale)
     ctx.translate(-scene.x0, -scene.y0)
-    _paint_scene(_Painter(ctx), scene)
+    _paint_scene(_Painter(ctx), scene, density, pdf)
 
 
 def _raster(scene: Scene, width: int, height: int, scale: float, ox=0.0, oy=0.0) -> bytes:
     surface = cairo.ImageSurface(cairo.FORMAT_RGB24, width, height)
-    _draw(surface, scene, scale, ox, oy)
+    _draw(surface, scene, scale, ox, oy, scale)
     buffer = io.BytesIO()
     surface.write_to_png(buffer)
     surface.finish()
@@ -274,7 +386,7 @@ def render_pdf(scene: Scene, options: ExportOptions) -> Rendered:
     surface = cairo.PDFSurface(buffer, page_w, page_h)
     surface.set_metadata(cairo.PDFMetadata.TITLE, "Family tree")
     surface.set_metadata(cairo.PDFMetadata.CREATOR, "FamTree")
-    _draw(surface, scene, scale, ox, oy)
+    _draw(surface, scene, scale, ox, oy, scale * PDF_PICTURE_DENSITY, pdf=True)
     surface.finish()
     return Rendered(buffer.getvalue(), "application/pdf", page_w, page_h, "pt", scale)
 

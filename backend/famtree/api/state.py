@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import IO
 
 from famtree.config import Settings
+from famtree.daily import DailySnapshots
 from famtree.domain import repository
 from famtree.domain.model import FamilyGraph
 from famtree.domain.visibility import Audience, authorize
@@ -30,7 +31,8 @@ class GraphViews:
         self._graphs: dict[Audience, FamilyGraph] = {}
         self._layouts: dict[Audience, Layout] = {}
 
-    def _refresh(self) -> None:
+    def _graph(self, audience: Audience) -> FamilyGraph:
+        """The current graph for `audience`; the caller holds the lock."""
         version = self._db.version
         if version != self._version:
             with self._db.read() as conn:
@@ -38,17 +40,20 @@ class GraphViews:
             self._graphs = {Audience.FULL: full}
             self._layouts = {}
             self._version = version
+        if audience not in self._graphs:
+            self._graphs[audience] = authorize(self._graphs[Audience.FULL], audience)
+        return self._graphs[audience]
 
     def graph(self, audience: Audience) -> FamilyGraph:
         with self._lock:
-            self._refresh()
-            if audience not in self._graphs:
-                self._graphs[audience] = authorize(self._graphs[Audience.FULL], audience)
-            return self._graphs[audience]
+            return self._graph(audience)
 
     def layout(self, audience: Audience) -> tuple[FamilyGraph, Layout]:
-        graph = self.graph(audience)
+        """A graph and the layout of that same graph. Both are read under one
+        hold of the lock, so a write cannot slip in between them and leave a
+        layout cached under a version whose graph it was not computed from."""
         with self._lock:
+            graph = self._graph(audience)
             if audience not in self._layouts:
                 self._layouts[audience] = compute_layout(graph)
             return graph, self._layouts[audience]
@@ -61,6 +66,7 @@ class AppState:
     storage_error: StorageUnavailable | None = None
     lock_handle: IO[bytes] | None = None
     views: GraphViews | None = None
+    daily_snapshots: DailySnapshots | None = None
     throttle: LoginThrottle = field(default_factory=LoginThrottle)
     # Exports are CPU- and memory-heavy; keep a small host responsive.
     export_slots: threading.BoundedSemaphore = field(

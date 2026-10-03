@@ -12,6 +12,8 @@ The following choices are retained:
 - Model people with names, extensible attributes, and mother/father, child, and spouse connections. Support multiple mothers, fathers, and spouses.
 - Show rounded person cards, generation rows, and right-angle family connection lines.
 - Provide the four generation controls, relation calculation, node menus, and configurable image/PDF export.
+- Let users select several cards and show only the selected people.
+- Keep daily snapshots of the tree that the admin can load or delete.
 
 Framework, database, and graph-layout library selection are implementation decisions. They must support the behavior and privacy rules below.
 
@@ -33,13 +35,22 @@ Framework, database, and graph-layout library selection are implementation decis
 - Provide an operator procedure for backing up and restoring the data, preserving the key separately, and resetting a forgotten admin password with host access. A password reset must not replace the data-encryption key.
 - Document that loss of the encryption key makes the encrypted data unrecoverable. At-rest encryption does not protect data from an operator who controls both the running server and its key.
 
+### Snapshots
+
+- At startup and then once a day, compare the tree with the latest daily snapshot. Save a new snapshot if the tree differs; otherwise renew the latest one, recording when the tree was first and last seen that way. Do not snapshot an empty tree.
+- A snapshot holds family data only: people, attribute values with their visibility, attribute definitions, relationships, and references to the pictures in use. A picture stays stored while any snapshot uses it. Credentials, access codes, sessions, and settings are not part of a snapshot.
+- Store snapshots inside the encrypted database. Keep the latest 20, counting both kinds and ordered by when each was last taken; taking another deletes the oldest.
+- The admin can list, delete, and load snapshots. Loading first saves the current tree as a snapshot, then replaces the tree in one transaction. Access codes, sessions, guest access, and the admin password are unchanged. Loaded records get new revisions, so an edit made from a page that still shows the replaced tree is rejected as stale.
+- A snapshot taken with a different database schema is listed but cannot be loaded.
+- Snapshots supplement backups rather than replace them: they are lost with the database.
+
 ## Access and privacy
 
 ### First launch and admin access
 
 - On initialization of an empty data directory, generate a strong random admin password and print it to the container's local standard output once. Do not expose it through a web endpoint.
 - Persist initialization state so restarts do not reset or reprint the password. Treat first-launch logs as sensitive and avoid forwarding the bootstrap password to routine application logging.
-- The admin can change the password, view and edit all family data, and manage access codes.
+- The admin can change the password, view and edit all family data, manage access codes, and view, load, and delete snapshots of the tree.
 - The admin can generate strong random codes, list and reveal existing codes, assign roles, and delete/revoke codes. Each code has an ID, optional label, role, creation time, and revocation state. Reveal full code values only in the authenticated admin interface.
 - Revoking a code removes access for sessions issued from it on subsequent requests. Permission changes also apply to existing sessions.
 
@@ -47,7 +58,7 @@ Framework, database, and graph-layout library selection are implementation decis
 
 Use whole-tree roles; permissions are not scoped to individual people or attributes.
 
-| Role | Read public data | Read private data | Edit family data and attribute definitions | Manage codes and admin settings |
+| Role | Read public data | Read private data | Edit family data and attribute definitions | Manage codes, snapshots, and admin settings |
 | --- | --- | --- | --- | --- |
 | Guest (no code) | Yes | No | No | No |
 | Public viewer code | Yes | No | No | No |
@@ -77,7 +88,7 @@ A public viewer code grants the same data access as a guest. Revoking a code rem
 
 ### People and attributes
 
-- Give each person a stable ID independent of their name. Require a nonempty name, but allow duplicate names.
+- Give each person a stable ID independent of their name. Require a nonempty name, but allow duplicate names. When a new person's name, or a changed name, matches someone already in the tree (ignoring case, accents, and spacing), warn the editor and show what tells the existing people apart; do not block the save.
 - Common optional attributes are birth date, location, profession, and a short description. Support a month-and-day birth date without a birth year; do not insert a fabricated year. An omitted date is distinct from a partially specified date.
 - Store names and other text as plain text and escape them for display and export.
 - Support reusable custom attribute definitions. Each definition has a stable ID, display label, and value type; editors can create a definition while editing a person, and it then becomes available for future people.
@@ -101,7 +112,7 @@ The family tree is a graph: multiple parents and spouses mean it is not necessar
 1. A user with edit permission creates the first person with a name and no connection. This is the bootstrap exception; adding a second person requires a public connection between them.
 2. For later additions, enter the new person's name and select a parent, child, or spouse connection. When adding from an existing card, preselect that person as the connection target.
 3. Show a matching-name dropdown while typing a related person's name. Include only information the editor may view; use permitted contextual attributes to distinguish people with the same name. Selecting a result links its existing ID and never creates a duplicate implicitly.
-4. If there is no appropriate match, offer an explicit action to create a new related person. Create the two people and their relationship in one transaction so neither is left invalid.
+4. If there is no appropriate match, offer an explicit action to create a new related person, with the duplicate-name warning if the name is already in the tree. Create the two people and their relationship in one transaction so neither is left invalid.
 5. For parent/child connections, collect the parent's mother/father role. Clearly identify which person is the parent before saving.
 6. The name is public. Choose public/private visibility for other attributes and relationships; at least one relationship for each newly created person must be public.
 7. Validate and save, then show the updated cards and reciprocal connections.
@@ -112,7 +123,7 @@ Edits and deletions must preserve graph validity and required public connections
 
 ### Cards and layout
 
-- Start with the full authorized tree visible and fit it to the viewport. Support pan and zoom so larger trees remain usable.
+- Start with the full authorized tree visible and fit it to the viewport. Support pan and zoom so larger trees remain usable. With a mouse, dragging selects (see below), so pan with Space + drag, a middle-button drag, or the arrow keys; the wheel zooms. On touch screens, a drag pans and two fingers zoom.
 - Use rectangles with rounded corners for people. Display the public name and a compact selection of permitted attributes; provide the remaining permitted details on selection.
 - Place parents above children, with spouses and siblings on the same generation row whenever these constraints are compatible.
 - Multiple parents and spouses can create conflicting generation constraints. Prioritize parent-above-child placement and clearly route exceptional connections when all same-row preferences cannot hold. Do not alter family data to simplify the drawing.
@@ -137,6 +148,14 @@ Edits and deletions must preserve graph validity and required public connections
 - Show all people in the included rows, including spouses and siblings placed there. Draw complete relationship lines only between visible endpoints and mark filtered continuations without revealing unauthorized relationships.
 - Add accessible labels: show one more generation above, hide one generation above, show one more generation below, and hide one generation below.
 - Disable controls at their limits and provide a reset to the full authorized tree. Selecting a different person resets the generation limits so earlier hidden rows do not create a misleading starting view.
+
+### Selection and View Only Selected
+
+- Dragging over the tree with a mouse or pen draws a selection rectangle; every card it touches is selected. Ctrl/⌘ + click adds or removes one card, and Ctrl/⌘ + drag adds to the selection. A plain click selects only that card and opens its details; clicking empty space clears the selection. From the keyboard, Ctrl/⌘ + Enter adds or removes the focused card.
+- A top-level **View Only Selected** button, showing how many people are selected, shows only those people and fits them to the screen. It shows the selection as it was when pressed; later changes to the selection take effect when it is pressed again. Cards keep their positions in the full layout.
+- Draw lines between shown people. A family line keeps the branches to its shown parents and the drops to its shown children, with its horizontal line shortened to match; a couple's line to their children needs both partners shown. Continuation marks show people whose relatives are not shown.
+- The generation controls still apply within the selected view. The person in focus stays visible: if they are not selected, View Only Selected lets go of them; someone chosen from the details panel or just added joins the view.
+- A top-level **Default View** button shows the full tree again: it ends View Only Selected, resets the generation controls, and fits the tree to the screen. The selection is kept.
 
 ### Available actions
 
@@ -163,7 +182,7 @@ All controls, person selection, and relation selection must work with keyboard n
 
 ## Export
 
-- Export the authorized tree view as an image or PDF. Offer **current view** (respecting generation filters) and **full authorized tree**, with a preview of the selected scope.
+- Export the authorized tree view as an image or PDF. Offer **current view** (respecting generation filters and View Only Selected) and **full authorized tree**, with a preview of the selected scope. Draw lines in the current view by the same rule as on screen.
 - Ask which attributes to include across the exported cards. An attribute selection includes a value only when the caller may view that value; mixed public/private values of the same attribute do not bypass privacy.
 - Require selection of at least one relationship category—parent/child or spouse—for placement; a one-person tree is exempt. Draw only selected, authorized relationships between included people. A filtered export may contain isolated cards even though each person has a public connection in the stored tree; retain those cards and their positions without inventing connections.
 - Preserve the generation layout and orthogonal connection style. Include public names on exported cards so people remain identifiable.
@@ -180,8 +199,11 @@ All controls, person selection, and relation selection must work with keyboard n
 - Multiple mothers, fathers, and spouses render without inventing marriages or parentage. Conflicting generation constraints remain understandable.
 - A birthday without a year round-trips without adding a year. A new custom attribute is available on another person and each value retains its chosen visibility.
 - Generation controls expand and collapse one level at a time, preserve the selected person, and reset to the full authorized tree.
+- Dragging over cards selects them and Ctrl/⌘ + click toggles one. View Only Selected shows only those people, with the lines between them; Default View returns to the full tree.
+- Adding or renaming a person to a name already in the tree warns the editor without preventing the save.
+- A daily snapshot is saved when the tree changed and renewed when it did not; only the latest 20 are kept. Loading one saves the current tree first and leaves access unchanged.
 - Relation examples include first cousins, first cousins twice removed, ancestors, siblings, multiple ancestry paths, spouses, and no visible relationship.
-- Image and PDF exports respect selected scope, attributes, required connections, and current permissions, including public names and private parent links.
+- Image and PDF exports respect selected scope (including View Only Selected), attributes, required connections, and current permissions, including public names and private parent links.
 
 ## Decisions to resolve before implementation
 

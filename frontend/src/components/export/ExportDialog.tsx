@@ -3,16 +3,29 @@ import { ApiError } from "../../api/client";
 import * as api from "../../api/endpoints";
 import type { ExportFormat, ExportPreview, ExportRequest, ExportScope, Orientation } from "../../api/types";
 import { BIRTH_DATE } from "../../lib/attributes";
-import type { GenerationWindow } from "../../lib/generations";
 import type { TreeIndex } from "../../lib/treeIndex";
 import { useToast } from "../../state/toasts";
 import { Dialog } from "../ui/Dialog";
 
+/** What the tree shows now: the generations around the person in focus,
+ * narrowed to the people of View Only Selected. */
+export interface ExportView {
+  window: ExportRequest["window"];
+  /** The window leaves out some generations. */
+  generationsHidden: boolean;
+  people: string[] | null;
+}
+
 interface Props {
   index: TreeIndex;
-  /** The current generation filter, if one is active. */
-  view: { selectedId: string; window: GenerationWindow; filtered: boolean } | null;
+  /** null when nobody is in focus and everyone is shown. */
+  view: ExportView | null;
   onClose: () => void;
+}
+
+function describeView(view: ExportView | null): string {
+  if (!view?.people) return "generations shown now";
+  return view.generationsHidden ? "the selected people, in the generations shown" : "only the selected people";
 }
 
 const PNG_WIDTHS = [1600, 3200, 6400, 9600, 12800];
@@ -30,7 +43,7 @@ const PAGE_SIZES: [string, string][] = [
 export function ExportDialog({ index, view, onClose }: Props) {
   const notify = useToast();
   const [format, setFormat] = useState<ExportFormat>("pdf");
-  const [scope, setScope] = useState<ExportScope>(view?.filtered ? "view" : "full");
+  const [scope, setScope] = useState<ExportScope>(view && (view.people || view.generationsHidden) ? "view" : "full");
   const [attributes, setAttributes] = useState<string[]>(index.definitions.has(BIRTH_DATE) ? [BIRTH_DATE] : []);
   const [parentLinks, setParentLinks] = useState(true);
   const [spouseLinks, setSpouseLinks] = useState(true);
@@ -46,7 +59,8 @@ export function ExportDialog({ index, view, onClose }: Props) {
     () => ({
       format,
       scope,
-      window: scope === "view" && view ? { selected_id: view.selectedId, ...view.window } : null,
+      window: scope === "view" && view ? view.window : null,
+      people: scope === "view" && view ? view.people : null,
       attributes,
       include_parent_links: parentLinks,
       include_spouse_links: spouseLinks,
@@ -138,7 +152,7 @@ export function ExportDialog({ index, view, onClose }: Props) {
             <legend>What to include</legend>
             <label>
               <input type="radio" checked={scope === "view"} disabled={!view} onChange={() => setScope("view")} /> Current
-              view (generations shown now)
+              view ({describeView(view)})
             </label>
             <label>
               <input type="radio" checked={scope === "full"} onChange={() => setScope("full")} /> Full tree

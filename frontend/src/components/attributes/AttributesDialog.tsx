@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ApiError } from "../../api/client";
 import * as api from "../../api/endpoints";
 import type { AttributeDefinition, ValueType } from "../../api/types";
-import { VALUE_TYPE_LABELS } from "../../lib/attributes";
+import { CUSTOM_VALUE_TYPES, VALUE_TYPE_LABELS } from "../../lib/attributes";
 import { useToast } from "../../state/toasts";
 import { useTree } from "../../state/tree";
 import { Dialog } from "../ui/Dialog";
@@ -58,7 +58,7 @@ export function AttributesDialog({ onClose }: { onClose: () => void }) {
         <div className="field">
           <label htmlFor="def-type">Type</label>
           <select id="def-type" value={type} onChange={(e) => setType(e.target.value as ValueType)}>
-            {Object.entries(VALUE_TYPE_LABELS).map(([value, text]) => (
+            {CUSTOM_VALUE_TYPES.map(([value, text]) => (
               <option key={value} value={value}>
                 {text}
               </option>
@@ -133,7 +133,7 @@ function DefinitionRow({
               )
             }
           >
-            {Object.entries(VALUE_TYPE_LABELS).map(([value, text]) => (
+            {CUSTOM_VALUE_TYPES.map(([value, text]) => (
               <option key={value} value={value}>
                 {text}
               </option>

@@ -93,6 +93,9 @@ def cmd_restore(settings: Settings, args: argparse.Namespace) -> int:
     print(f"Restored {summary.people} people from {summary.path}")
     if replaced:
         print(f"The previous database was kept as {replaced}")
+    print("Everyone was signed out. Access codes, guest access and the admin password")
+    print("are now as they were when the backup was taken: review them under Admin,")
+    print("and revoke again any code revoked since then.")
     print("Start the service again to use the restored tree.")
     return 0
 

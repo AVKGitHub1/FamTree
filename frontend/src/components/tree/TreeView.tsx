@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { cardLines } from "../../lib/attributes";
-import { continuations, inRange, visibleConnectors, type RowRange } from "../../lib/generations";
+import { pictureUrl } from "../../api/endpoints";
+import { cardLines, profilePicture } from "../../lib/attributes";
+import { continuations, shownBy, visibleConnectors, visibleCrossings, type RowRange } from "../../lib/generations";
 import type { TreeIndex } from "../../lib/treeIndex";
 import {
   boundsOf,
+  boxBetween,
   fitTransform,
+  overlaps,
   panIntoView,
+  toTree,
   zoomAt,
   type Box,
   type Transform,
@@ -24,7 +28,10 @@ export interface Occlusion {
 interface Props {
   index: TreeIndex;
   range: RowRange;
+  /** Draw only these people (View Only Selected); null draws everyone in `range`. */
+  only: ReadonlySet<string> | null;
   selectedId: string | null;
+  selection: ReadonlySet<string>;
   picks: { first: string | null; second: string | null };
   highlight: { people: Set<string>; links: Set<string> };
   occlusion: Occlusion;
@@ -33,6 +40,10 @@ interface Props {
   focusScale: number | null;
   menuFor: (id: string) => MenuItem[];
   onActivate: (id: string) => void;
+  /** Add a card to the selection or remove it (Ctrl/⌘ + click). */
+  onToggle: (id: string) => void;
+  /** Replace the selection (after dragging over cards). */
+  onSelect: (ids: string[]) => void;
   onBackground: () => void;
   describe: (id: string) => string;
 }
@@ -40,27 +51,31 @@ interface Props {
 const DRAG_THRESHOLD = 4;
 
 export function TreeView(props: Props) {
-  const { index, range, selectedId, picks, highlight, occlusion, fitRequest, focusScale } = props;
+  const { index, range, only, selectedId, selection, picks, highlight, occlusion, fitRequest, focusScale } = props;
+  const { onActivate, onToggle } = props;
   const viewportRef = useRef<HTMLDivElement>(null);
   const cardRefs = useRef(new Map<string, HTMLDivElement>());
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [transform, setTransform] = useState<Transform>({ x: 0, y: 0, k: 1 });
 
   const layout = index.data.layout;
-  const visibleIds = useMemo(
-    () => Object.keys(layout.nodes).filter((id) => inRange(layout.nodes[id].row, range)),
-    [layout, range],
-  );
-  const connectors = useMemo(() => visibleConnectors(index, range), [index, range]);
-  const crossings = useMemo(() => {
-    const shown = new Set(connectors.map((c) => c.id));
-    return layout.crossings.filter((x) => shown.has(x.over) && shown.has(x.under));
-  }, [layout, connectors]);
-  const marks = useMemo(() => continuations(index, range), [index, range]);
+  const shown = useMemo(() => shownBy(index, range, only), [index, range, only]);
+  const visibleIds = useMemo(() => Object.keys(layout.nodes).filter(shown), [layout, shown]);
+  const connectors = useMemo(() => visibleConnectors(index, range, only), [index, range, only]);
+  const crossings = useMemo(() => visibleCrossings(index, connectors, range, only), [index, connectors, range, only]);
+  const marks = useMemo(() => continuations(index, range, only), [index, range, only]);
   const lines = useMemo(
     () => new Map(index.data.people.map((p) => [p.id, cardLines(p, index.definitions)])),
     [index],
   );
+  const pictures = useMemo(() => {
+    const urls = new Map<string, string>();
+    for (const p of index.data.people) {
+      const picture = profilePicture(p, index.definitions);
+      if (picture) urls.set(p.id, pictureUrl(p.id, picture.id, "thumb"));
+    }
+    return urls;
+  }, [index]);
 
   // Area not covered by the side panel / bottom sheet / floating controls.
   const safeArea = useCallback(
@@ -133,12 +148,25 @@ export function TreeView(props: Props) {
     }
   }
 
-  // --- pan & zoom ------------------------------------------------------------
-  // Drags may start anywhere, cards included (needed on touch screens). The
-  // pointer is captured only once it has really moved, so a tap still reaches
-  // the card under it and a drag never activates one.
+  // --- pan, zoom & select ----------------------------------------------------
+  // With a mouse or pen a drag selects the cards it passes over (Ctrl/⌘ adds
+  // them to the selection); it pans with the middle button or while Space is
+  // held. On touch screens a drag pans and two fingers zoom. Drags may start
+  // anywhere, cards included. The pointer is captured only once it has really
+  // moved, so a tap still reaches the card under it and a drag never
+  // activates one.
   const pointers = useRef(new Map<number, { x: number; y: number }>());
-  const gesture = useRef({ moved: false, onBackground: false, pinch: null as number | null, start: { x: 0, y: 0 } });
+  const gesture = useRef({
+    select: false,
+    add: false,
+    moved: false,
+    onBackground: false,
+    pinch: null as number | null,
+    start: { x: 0, y: 0 },
+  });
+  const [marquee, setMarquee] = useState<{ box: Box; ids: Set<string> } | null>(null);
+  const space = useRef({ held: false, panned: false });
+  const [spaceHeld, setSpaceHeld] = useState(false);
 
   useEffect(() => {
     const element = viewportRef.current;
@@ -153,18 +181,76 @@ export function TreeView(props: Props) {
     return () => element.removeEventListener("wheel", onWheel);
   }, []);
 
+  // Space is the pan key wherever it would not type or press a button. A
+  // focused card still answers to it, on release (as a native button does)
+  // and only if the tree was not panned meanwhile.
+  useEffect(() => {
+    const element = viewportRef.current;
+    const claims = (target: EventTarget | null) =>
+      target === document.body ||
+      (target instanceof Element && !!element?.contains(target) && !target.closest("button, input, select, textarea"));
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== " " || !claims(event.target)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.repeat || space.current.held) return;
+      space.current = { held: true, panned: false };
+      setSpaceHeld(true);
+    };
+    const onKeyUp = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== " " || !space.current.held) return;
+      space.current.held = false;
+      setSpaceHeld(false);
+      const card = event.target instanceof HTMLElement && event.target.classList.contains("card") ? event.target : null;
+      const id = card?.dataset.personId;
+      if (id && !space.current.panned) (event.ctrlKey || event.metaKey ? onToggle : onActivate)(id);
+    };
+    const onBlur = () => {
+      space.current.held = false;
+      setSpaceHeld(false);
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("keyup", onKeyUp, true);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("keyup", onKeyUp, true);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, [onActivate, onToggle]);
+
   const local = (event: { clientX: number; clientY: number }) => {
     const rect = viewportRef.current!.getBoundingClientRect();
     return { x: event.clientX - rect.left, y: event.clientY - rect.top };
   };
 
+  /** The dragged-out box and the cards it selects: those it touches, plus
+   * the existing selection when adding to it. */
+  const marqueeTo = (point: { x: number; y: number }) => {
+    const box = boxBetween(gesture.current.start, point);
+    const area = toTree(transform, box);
+    const ids = new Set(gesture.current.add ? selection : []);
+    for (const id of visibleIds) if (overlaps(layout.nodes[id], area)) ids.add(id);
+    return { box, ids };
+  };
+
   const onPointerDown = (event: React.PointerEvent) => {
     const target = event.target as HTMLElement;
     if (target.closest("button, .legend, .menu__list")) return;
+    const touch = event.pointerType === "touch";
+    if (!touch && event.button !== 0 && event.button !== 1) return; // leave the context menu be
+    if (event.button === 1) event.preventDefault(); // no autoscroll
     const point = local(event);
     pointers.current.set(event.pointerId, point);
     if (pointers.current.size === 1) {
-      gesture.current = { moved: false, onBackground: !target.closest(".card"), pinch: null, start: point };
+      gesture.current = {
+        select: !touch && event.button === 0 && !space.current.held,
+        add: event.ctrlKey || event.metaKey,
+        moved: false,
+        onBackground: event.button === 0 && !target.closest(".card"),
+        pinch: null,
+        start: point,
+      };
     }
   };
 
@@ -192,15 +278,31 @@ export function TreeView(props: Props) {
       viewportRef.current?.setPointerCapture(event.pointerId);
     }
     pointers.current.set(event.pointerId, point);
+    if (gesture.current.select) {
+      setMarquee(marqueeTo(point));
+      return;
+    }
+    if (space.current.held) space.current.panned = true;
     setTransform((t) => ({ ...t, x: t.x + point.x - previous.x, y: t.y + point.y - previous.y }));
   };
 
   const onPointerUp = (event: React.PointerEvent) => {
     if (!pointers.current.delete(event.pointerId)) return;
     if (pointers.current.size < 2) gesture.current.pinch = null;
-    if (pointers.current.size === 0 && gesture.current.onBackground && !gesture.current.moved) {
+    if (pointers.current.size > 0) return;
+    const { select, moved, onBackground } = gesture.current;
+    if (select && moved) {
+      props.onSelect([...marqueeTo(local(event)).ids]);
+      setMarquee(null);
+    } else if (onBackground && !moved) {
       props.onBackground();
     }
+  };
+
+  const onPointerCancel = (event: React.PointerEvent) => {
+    pointers.current.delete(event.pointerId);
+    gesture.current = { ...gesture.current, select: false, moved: true, pinch: null };
+    setMarquee(null);
   };
 
   const zoomBy = (factor: number) =>
@@ -235,37 +337,36 @@ export function TreeView(props: Props) {
       const node = layout.nodes[id];
       let target: string | undefined;
       if (key === "ArrowLeft" || key === "ArrowRight") {
-        const row = index.rows[node.row] ?? [];
+        const row = (index.rows[node.row] ?? []).filter(shown);
         target = row[row.indexOf(id) + (key === "ArrowLeft" ? -1 : 1)];
       } else {
-        const rowIndex = node.row + (key === "ArrowUp" ? -1 : 1);
-        if (inRange(rowIndex, range)) {
-          const centre = node.x + node.width / 2;
-          target = (index.rows[rowIndex] ?? []).reduce<string | undefined>((best, candidate) => {
-            const c = layout.nodes[candidate];
-            const b = best ? layout.nodes[best] : undefined;
-            const dist = (n: typeof c) => Math.abs(n.x + n.width / 2 - centre);
-            return !b || dist(c) < dist(b) ? candidate : best;
-          }, undefined);
+        // The nearest card in the next row up or down that has one shown.
+        const step = key === "ArrowUp" ? -1 : 1;
+        const centre = node.x + node.width / 2;
+        const dist = (candidate: string) => Math.abs(layout.nodes[candidate].x + layout.nodes[candidate].width / 2 - centre);
+        for (let row = node.row + step; !target && row >= 0 && row <= index.maxRow; row += step) {
+          target = (index.rows[row] ?? [])
+            .filter(shown)
+            .reduce<string | undefined>((best, candidate) => (!best || dist(candidate) < dist(best) ? candidate : best), undefined);
         }
       }
       if (!target) return;
       cardRefs.current.get(target)?.focus({ preventScroll: true });
       setTransform((t) => panIntoView(t, layout.nodes[target], safeArea()));
     },
-    [index, layout, range, safeArea],
+    [index, layout, shown, safeArea],
   );
 
   return (
     <div
       ref={viewportRef}
-      className="viewport"
+      className={`viewport${spaceHeld ? " is-pan-ready" : ""}`}
       tabIndex={0}
-      aria-label="Family tree. Drag or use arrow keys to move, plus and minus to zoom, 0 to fit."
+      aria-label="Family tree. Drag over cards to select them; Ctrl+click or Ctrl+Enter adds or removes one. Hold Space and drag, or use the arrow keys, to move; plus and minus to zoom, 0 to fit."
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
+      onPointerCancel={onPointerCancel}
       onKeyDown={onViewportKey}
     >
       <div
@@ -294,18 +395,28 @@ export function TreeView(props: Props) {
               person={person}
               node={layout.nodes[id]}
               lines={lines.get(id) ?? []}
+              picture={pictures.get(id) ?? null}
               selected={selectedId === id}
+              marked={marquee ? marquee.ids.has(id) : selection.has(id)}
               pick={pick}
               onPath={highlight.people.has(id)}
               menuItems={selectedId === id ? props.menuFor(id) : null}
               description={props.describe(id)}
-              onActivate={props.onActivate}
+              onActivate={onActivate}
+              onToggle={onToggle}
               onNavigate={onNavigate}
               registerRef={registerRef}
             />
           );
         })}
       </div>
+      {marquee && (
+        <div
+          className="marquee"
+          aria-hidden="true"
+          style={{ left: marquee.box.x, top: marquee.box.y, width: marquee.box.width, height: marquee.box.height }}
+        />
+      )}
       <div className="zoom-controls" role="group" aria-label="Zoom">
         <button type="button" className="control-button" aria-label="Zoom in" onClick={() => zoomBy(1.25)}>
           +
@@ -316,7 +427,7 @@ export function TreeView(props: Props) {
         <button
           type="button"
           className="control-button control-button--text"
-          aria-label="Fit the shown generations to the screen"
+          aria-label="Fit the shown people to the screen"
           onClick={fitVisible}
         >
           Fit

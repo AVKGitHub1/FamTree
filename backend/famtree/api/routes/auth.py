@@ -7,7 +7,14 @@ import logging
 from fastapi import APIRouter, Depends, Request, Response
 
 from famtree.api import serializers
-from famtree.api.deps import CSRF_COOKIE, SESSION_COOKIE, get_db, get_state, get_viewer
+from famtree.api.deps import (
+    CSRF_COOKIE,
+    SESSION_COOKIE,
+    get_db,
+    get_state,
+    get_viewer,
+    sessions_allowed,
+)
 from famtree.api.errors import RateLimited
 from famtree.api.schemas import LoginRequest
 from famtree.api.state import AppState
@@ -30,6 +37,11 @@ class InvalidCredentials(DomainError):
     code = "invalid_credentials"
 
 
+class HttpsRequired(DomainError):
+    status = 403
+    code = "https_required"
+
+
 def _secure(request: Request, state: AppState) -> bool:
     mode = state.settings.cookie_secure
     if mode == "auto":
@@ -41,12 +53,17 @@ def _guest_csrf(request: Request, response: Response, state: AppState) -> str:
     token = request.cookies.get(CSRF_COOKIE)
     if not token or len(token) > 100:
         token = new_csrf_token()
+        # Not a credential: it follows the transport even when sessions must be
+        # Secure, so guests can still use the public tree over plain HTTP.
+        secure = state.settings.cookie_secure != "false" and is_https(
+            request, state.settings.trusted_proxies
+        )
         response.set_cookie(
             CSRF_COOKIE,
             token,
             httponly=True,
             samesite="strict",
-            secure=_secure(request, state),
+            secure=secure,
             path="/api",
         )
     return token
@@ -76,6 +93,10 @@ def login(
     state: AppState = Depends(get_state),
 ) -> dict:
     settings = state.settings
+    if not sessions_allowed(request, settings):
+        raise HttpsRequired(
+            "Sign in over HTTPS. This site does not accept sign-ins over plain HTTP."
+        )
     retry = state.throttle.check(client_ip(request, settings.trusted_proxies))
     if retry:
         log.warning("Sign-in rate limit reached")

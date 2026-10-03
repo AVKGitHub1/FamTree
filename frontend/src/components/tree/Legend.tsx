@@ -28,7 +28,7 @@ export function Legend({ onClose }: { onClose: () => void }) {
               <rect x="2" y="2" width="36" height="12" rx="4" />
             </g>
           </svg>
-          Shared parents with no recorded marriage
+          Joins parents to their shared children
         </li>
         <li>
           <svg width="40" height="12" aria-hidden="true" className="connector connector--family">
@@ -48,9 +48,13 @@ export function Legend({ onClose }: { onClose: () => void }) {
             <path className="stub" d="M20 16 L20 2" />
             <path className="stub-arrow" d="M16 8 L20 2 L24 8" />
           </svg>
-          Relatives in hidden generations
+          Relatives who are not shown
         </li>
       </ul>
+      <p className="legend__hint">
+        Drag over cards to select them; Ctrl+click (⌘+click on a Mac) adds or removes one. To move the tree, hold
+        Space and drag, drag with the middle mouse button, or use the arrow keys. On a touch screen, drag to move.
+      </p>
     </aside>
   );
 }

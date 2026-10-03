@@ -37,7 +37,7 @@ class ExportFormat(StrEnum):
 
 class ExportScope(StrEnum):
     FULL = "full"  # the full authorized tree
-    VIEW = "view"  # the generation rows currently shown
+    VIEW = "view"  # what the tree shows now: generation rows, chosen people
 
 
 class Orientation(StrEnum):
@@ -58,6 +58,9 @@ class ExportOptions:
     format: ExportFormat
     scope: ExportScope = ExportScope.FULL
     window: GenerationWindow | None = None
+    # View Only Selected: with the `view` scope, only these people (among the
+    # rows of `window`, if any). Ids the caller cannot see are ignored.
+    people: frozenset[str] | None = None
     attributes: list[str] = field(default_factory=list)
     include_parent_links: bool = True
     include_spouse_links: bool = True

@@ -11,6 +11,7 @@ import { useTree } from "../../state/tree";
 import { Dialog } from "../ui/Dialog";
 import { VisibilityChoice } from "../ui/Visibility";
 import { AttributeRows } from "./AttributeRows";
+import { NamesakeWarning } from "./NamesakeWarning";
 import { PersonPicker, type Picked } from "./PersonPicker";
 
 type Relation = "parent" | "child" | "spouse";
@@ -148,6 +149,11 @@ export function AddDialog({ index, anchorId, onClose, onCreated }: Props) {
               <label htmlFor="new-person-name">Name (always public)</label>
               <input id="new-person-name" autoFocus value={newName} maxLength={200} onChange={(e) => setNewName(e.target.value)} />
             </div>
+            <NamesakeWarning
+              index={index}
+              name={newName}
+              advice="Saving adds a second person with this name. If it is the same person, cancel and use Add connection on their card instead."
+            />
             <details>
               <summary>More details (optional, private unless you choose otherwise)</summary>
               <AttributeRows rows={newRows} definitions={index.definitions} onChange={setNewRows} />
@@ -176,6 +182,13 @@ export function AddDialog({ index, anchorId, onClose, onCreated }: Props) {
               exclude={exclude}
               autoFocus={Boolean(anchorId)}
             />
+            {other?.kind === "new" && (
+              <NamesakeWarning
+                index={index}
+                name={other.name}
+                advice="Saving creates a second person with this name. If it is the same person, choose them from the suggestions instead."
+              />
+            )}
             {other?.kind === "new" && (
               <details>
                 <summary>Details for {other.name} (optional)</summary>

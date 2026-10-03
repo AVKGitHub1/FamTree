@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from famtree.layout.types import (
+    EPS,
     Connector,
     ConnectorType,
     Crossing,
@@ -36,7 +37,6 @@ from famtree.layout.types import (
     SpouseRoute,
 )
 
-EPS = 0.5
 TRACK_PAD = 6.0
 SPOUSE_ATTACH = 0.25  # attach routed spouse lines a quarter-width off centre
 SINGLE_ATTACH = 0.15  # bottom attach for a single parent hemmed in by spouses
@@ -198,6 +198,7 @@ class Router:
                 more, x_src = self.descend(owner, self.x(p), family.parent_chains[p])
                 path += more
                 path += [(x_src, rake), (junction, rake), (junction, YRef("jtop", channel))]
+                connector.branches[p] = len(draft.paths)
                 draft.paths.append(path)
             trunk, x_cur = [(junction, YRef("jbottom", channel))], junction
             first_zone = LOWER
@@ -216,9 +217,12 @@ class Router:
         low, high = _Span(child_xs, x_cur, True), _Span(child_xs, x_cur, False)
         bus = self.track(child_row, LOWER, owner, low, high)
         trunk.append((x_cur, bus))
+        connector.trunk = len(draft.paths)
         draft.paths.append(trunk)
+        connector.bus = len(draft.paths)
         draft.paths.append([(low, bus), (high, bus)])
-        for cx in child_xs:
+        for child, cx in zip(family.children, child_xs, strict=True):
+            connector.drops[child] = len(draft.paths)
             draft.paths.append([(cx, bus), (cx, YRef("top", child_row))])
         # Dots mark real branch points, so a plain crossing is never mistaken for one.
         for value in [x_cur, *child_xs]:
@@ -515,25 +519,30 @@ class _Interior:
 def find_crossings(connectors: list[Connector]) -> list[Crossing]:
     """Proper crossings between different connectors (T-junctions, shared
     endpoints and collinear overlaps are not crossings)."""
-    verticals: list[tuple[float, float, float, str]] = []
-    horizontals: list[tuple[float, float, float, str]] = []
+    Segment = tuple[float, float, float, str, str | None]
+    verticals: list[Segment] = []
+    horizontals: list[Segment] = []
     for c in connectors:
-        for path in c.paths:
+        branch_of = {i: parent for parent, i in c.branches.items()}
+        for i, path in enumerate(c.paths):
+            branch = branch_of.get(i)
             for (x1, y1), (x2, y2) in itertools.pairwise(path):
                 if abs(x1 - x2) < 0.01:
-                    verticals.append((x1, min(y1, y2), max(y1, y2), c.id))
+                    verticals.append((x1, min(y1, y2), max(y1, y2), c.id, branch))
                 elif abs(y1 - y2) < 0.01:
-                    horizontals.append((y1, min(x1, x2), max(x1, x2), c.id))
-    verticals.sort()
+                    horizontals.append((y1, min(x1, x2), max(x1, x2), c.id, branch))
+    verticals.sort(key=lambda v: v[:4])
     xs = [v[0] for v in verticals]
     found = set()
-    for y, hx1, hx2, h_id in horizontals:
+    for y, hx1, hx2, h_id, h_branch in horizontals:
         start = bisect.bisect_right(xs, hx1 + EPS)
         end = bisect.bisect_left(xs, hx2 - EPS)
-        for x, vy1, vy2, v_id in verticals[start:end]:
+        for x, vy1, vy2, v_id, v_branch in verticals[start:end]:
             if v_id != h_id and vy1 + EPS < y < vy2 - EPS:
-                found.add(Crossing(x, y, over=v_id, under=h_id))
-    return sorted(found, key=lambda c: (c.y, c.x, c.over, c.under))
+                found.add(Crossing(x, y, v_id, h_id, v_branch, h_branch))
+    return sorted(
+        found, key=lambda c: (c.y, c.x, c.over, c.under, c.over_branch or "", c.under_branch or "")
+    )
 
 
 def _simplify(points: list[Point]) -> list[Point]:

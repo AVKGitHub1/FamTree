@@ -5,6 +5,10 @@ interface Props {
   hasPeople: boolean;
   relationActive: boolean;
   onRelation: () => void;
+  selectedCount: number;
+  viewingSelected: boolean;
+  onViewSelected: () => void;
+  onDefaultView: () => void;
   onAdd: () => void;
   onExport: () => void;
   onAttributes: () => void;
@@ -29,6 +33,29 @@ export function Header(props: Props) {
           aria-pressed={props.relationActive}
         >
           Calculate Relation
+        </button>
+        <button
+          type="button"
+          className={`button${props.viewingSelected ? " is-active" : ""}`}
+          onClick={props.onViewSelected}
+          disabled={!props.hasPeople || props.selectedCount === 0}
+          title={
+            props.selectedCount
+              ? `Show only the ${props.selectedCount} selected ${props.selectedCount === 1 ? "person" : "people"}`
+              : "Drag over cards, or Ctrl+click them, to select people first"
+          }
+        >
+          View Only Selected
+          {props.selectedCount > 0 && <span className="button__count">{props.selectedCount}</span>}
+        </button>
+        <button
+          type="button"
+          className="button"
+          onClick={props.onDefaultView}
+          disabled={!props.hasPeople}
+          title="Show the full tree, fitted to the screen"
+        >
+          Default View
         </button>
         {can("add_connection") && (
           <button type="button" className="button" onClick={props.onAdd}>

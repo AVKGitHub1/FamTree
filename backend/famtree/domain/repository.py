@@ -4,7 +4,7 @@ the transaction (see `Database.read`/`Database.write`)."""
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from famtree import clock
 from famtree.domain.attributes import ValueType, label_key
@@ -19,6 +19,9 @@ from famtree.domain.model import (
 )
 from famtree.security.tokens import new_id
 from famtree.storage.database import Connection, Row
+
+if TYPE_CHECKING:
+    from famtree.domain.pictures import Picture
 
 
 def _dump(value: Any) -> str:
@@ -271,3 +274,48 @@ def label_in_use(conn: Connection, label: str, except_id: str | None = None) -> 
         "SELECT id FROM attribute_definitions WHERE label_key = ?", (label_key(label),)
     ).fetchone()
     return row is not None and row["id"] != except_id
+
+
+# --- pictures ----------------------------------------------------------------
+
+# An upload is kept this long before a person's details are saved with it.
+UNSAVED_PICTURE_HOURS = 1
+
+
+def insert_image(conn: Connection, picture: Picture) -> str:
+    image_id = new_id()
+    conn.execute(
+        "INSERT INTO images (id, full, thumb, width, height, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (image_id, picture.full, picture.thumb, picture.width, picture.height, clock.now_iso()),
+    )
+    return image_id
+
+
+def image_exists(conn: Connection, image_id: str) -> bool:
+    return conn.execute("SELECT 1 FROM images WHERE id = ?", (image_id,)).fetchone() is not None
+
+
+def load_image(conn: Connection, image_id: str, variant: str = "full") -> bytes | None:
+    column = {"full": "full", "thumb": "thumb"}[variant]
+    row = conn.execute(f"SELECT {column} FROM images WHERE id = ?", (image_id,)).fetchone()
+    return None if row is None else bytes(row[0])
+
+
+IMAGES_IN_USE = (
+    "SELECT json_extract(v.value, '$.id') FROM attribute_values v"
+    " JOIN attribute_definitions d ON d.id = v.definition_id"
+    " WHERE d.value_type = 'image' AND json_extract(v.value, '$.id') IS NOT NULL"
+)
+
+
+def delete_unused_images(conn: Connection) -> int:
+    """Drop pictures neither a value nor a snapshot refers to (removed,
+    replaced, their person deleted, or uploaded but never saved) once they are
+    past an unsaved upload's grace period. Until then they are kept but never
+    served: serving needs a value."""
+    cursor = conn.execute(
+        f"DELETE FROM images WHERE id NOT IN ({IMAGES_IN_USE})"
+        " AND id NOT IN (SELECT image_id FROM snapshot_images) AND created_at < ?",
+        (clock.iso_after(-UNSAVED_PICTURE_HOURS),),
+    )
+    return cursor.rowcount

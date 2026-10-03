@@ -3,7 +3,7 @@ semantic validation and converts these into its own types."""
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -177,6 +177,7 @@ class ExportRequest(Strict):
     format: ExportFormat
     scope: ExportScope = ExportScope.FULL
     window: WindowIn | None = None
+    people: list[Annotated[str, Id]] | None = Field(None, max_length=20_000)
     attributes: list[str] = Field(default_factory=list, max_length=100)
     include_parent_links: bool = True
     include_spouse_links: bool = True
@@ -193,6 +194,7 @@ class ExportRequest(Strict):
             format=self.format,
             scope=self.scope,
             window=window,
+            people=None if self.people is None else frozenset(self.people),
             attributes=list(self.attributes),
             include_parent_links=self.include_parent_links,
             include_spouse_links=self.include_spouse_links,

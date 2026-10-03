@@ -41,7 +41,8 @@ export function TreeProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
-  // What a caller may see depends on their role, so refetch when it changes.
+  // What a caller may see depends on their role. App remounts this provider
+  // (dropping the old index) whenever that changes; this loads the new tree.
   // Guests read nothing while the admin has turned guest access off.
   const role = session?.capabilities.includes("read_public") ? session.role : null;
   useEffect(() => {

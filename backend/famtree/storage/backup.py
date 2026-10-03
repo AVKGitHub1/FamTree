@@ -21,7 +21,7 @@ from famtree.storage.bootstrap import (
 )
 from famtree.storage.database import DecryptionError, export_encrypted, open_connection
 from famtree.storage.keyfile import DatabaseKey
-from famtree.storage.migrations import current_version
+from famtree.storage.migrations import SCHEMA_VERSION, current_version
 
 
 class BackupError(RuntimeError):
@@ -54,6 +54,11 @@ def verify_backup(path: Path, key: DatabaseKey) -> BackupSummary:
         version = current_version(conn)
         if version == 0:
             raise BackupError(f"{path} is not a FamTree database")
+        if version > SCHEMA_VERSION:
+            raise BackupError(
+                f"{path} has schema version {version}, newer than this release supports "
+                f"({SCHEMA_VERSION}); upgrade FamTree before restoring it"
+            )
         people = conn.execute("SELECT count(*) FROM people").fetchone()[0]
         links = conn.execute(
             "SELECT (SELECT count(*) FROM parent_links) + (SELECT count(*) FROM spouse_links)"
@@ -92,30 +97,66 @@ def create_backup(settings: Settings, output_dir: Path | None = None) -> BackupS
 
 def restore_backup(settings: Settings, source: Path) -> tuple[BackupSummary, Path | None]:
     """Replace the live database with `source`. The server must be stopped; the
-    previous database is kept beside it rather than deleted."""
+    previous database is kept beside it rather than deleted.
+
+    The replacement is copied and synced next to the live database before
+    anything live is touched, so a failed copy leaves the live files as they
+    were. Sessions are removed from the restored copy: everyone signs in again.
+    """
     check_data_dir(settings)
     key = load_settings_key(settings)
     summary = verify_backup(source, key)
     lock = acquire_lock(settings.data_dir)
     try:
         db_path = settings.db_path
-        replaced: Path | None = None
-        if db_path.exists():
-            replaced = db_path.with_name(f"{db_path.name}.replaced-{_stamp()}")
-            for suffix in ("-wal", "-shm"):
-                sidecar = db_path.with_name(db_path.name + suffix)
-                if sidecar.exists():
-                    os.replace(sidecar, replaced.with_name(replaced.name + suffix))
-            os.replace(db_path, replaced)
         staging = db_path.with_name(db_path.name + ".restoring")
-        shutil.copyfile(source, staging)
-        staging.chmod(0o600)
-        _fsync(staging)
-        os.replace(staging, db_path)
-        _fsync(db_path.parent)
+        try:
+            shutil.copyfile(source, staging)
+            staging.chmod(0o600)
+            _end_sessions(staging, key)
+            _fsync(staging)
+        except BaseException:
+            staging.unlink(missing_ok=True)
+            raise
+        replaced = _swap_in(staging, db_path)
     finally:
         release_lock(lock)
     return summary, replaced
+
+
+def _end_sessions(path: Path, key: DatabaseKey) -> None:
+    """A backup carries the sessions that were open when it was taken; they must
+    not come back to life with it."""
+    conn = open_connection(path, key, wal=False)
+    try:
+        conn.execute("DELETE FROM sessions")
+    finally:
+        conn.close()
+
+
+def _swap_in(staging: Path, db_path: Path) -> Path | None:
+    """Move the live database and its sidecars aside, then the staged copy into
+    place. If that fails, the live files get their own names back.
+
+    The database goes first, so an interruption never leaves it without its
+    WAL; leftover sidecars are moved too, so none can attach to the copy."""
+    replaced = db_path.with_name(f"{db_path.name}.replaced-{_stamp()}")
+    moved: list[tuple[Path, Path]] = []
+    try:
+        for suffix in ("", "-wal", "-shm"):
+            live = db_path.with_name(db_path.name + suffix)
+            if live.exists():
+                aside = replaced.with_name(replaced.name + suffix)
+                os.replace(live, aside)
+                moved.append((aside, live))
+        os.replace(staging, db_path)
+    except BaseException:
+        for aside, live in reversed(moved):
+            os.replace(aside, live)
+        staging.unlink(missing_ok=True)
+        raise
+    _fsync(db_path.parent)
+    return replaced if moved else None
 
 
 def _fsync(path: Path) -> None:

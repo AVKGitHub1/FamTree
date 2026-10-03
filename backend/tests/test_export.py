@@ -1,9 +1,13 @@
 """Exports: scope, attribute privacy, relationship categories and file output."""
 
+from dataclasses import replace
+
 import pytest
 from builders import GraphBuilder, sample_family
 from conftest import requires_rendering
+from pydantic import ValidationError
 
+from famtree.api.schemas import ExportRequest
 from famtree.domain.errors import InvalidInput
 from famtree.domain.visibility import Audience, authorize
 from famtree.export.options import ExportFormat, ExportOptions, ExportScope, GenerationWindow
@@ -60,6 +64,58 @@ def test_current_view_scope_respects_generation_window():
     # Connectors are only drawn when every endpoint is in the export.
     for connector in build_scene(graph, options).connectors:
         assert "grandpa" not in connector.people and "kid" not in connector.people
+
+
+def test_current_view_keeps_branches_between_included_people():
+    # P -> Q, P -> C and Q -> C put P, Q and C on rows 0, 1 and 2. C's two
+    # parents share one connector; with P filtered out, Q -> C must remain.
+    g = GraphBuilder()
+    p, q, c = g.people("P", "Q", "C")
+    g.parent(p, q)
+    g.parent(p, c)
+    kept = g.parent(q, c, "mother")
+    options = ExportOptions(
+        ExportFormat.PNG, scope=ExportScope.VIEW, window=GenerationWindow(q, above=0, below=1)
+    )
+    scene = build_scene(g.build(), options)
+    assert {card.name for card in scene.cards} == {"Q", "C"}
+    assert len(scene.connectors) == 1
+    family = scene.connectors[0]
+    assert kept in family.links and set(family.branches) == {q}
+    top = min(card.y for card in scene.cards)
+    assert all(y >= top for path in family.paths for _, y in path)  # nothing from P's row
+    assert all(x.over_branch != p and x.under_branch != p for x in scene.crossings)
+
+
+def test_current_view_can_be_narrowed_to_chosen_people():
+    graph = sample_family()
+    chosen = frozenset({"dad", "mom", "me", "kid", "no-such-person"})
+    options = ExportOptions(ExportFormat.PNG, scope=ExportScope.VIEW, people=chosen)
+    scene = build_scene(graph, options)
+    assert {c.name for c in scene.cards} == {"Dad", "Mom", "Me", "Kid"}  # unknown ids drop out
+    # Dad and Mom's line to their children keeps Me's drop, not Sibling's.
+    family = next(c for c in scene.connectors if c.type is ConnectorType.FAMILY)
+    assert set(family.people) >= {"dad", "mom", "me"} and set(family.drops) == {"me"}
+    assert {c.type for c in scene.connectors} == {ConnectorType.FAMILY, ConnectorType.SPOUSE}
+    # Kid's parents are a couple; without Partner their line is not drawn.
+    assert not any("kid" in c.people for c in scene.connectors)
+
+    windowed = replace(options, window=GenerationWindow("me", above=1, below=0))
+    assert {c.name for c in build_scene(graph, windowed).cards} == {"Dad", "Mom", "Me"}
+    full = replace(options, scope=ExportScope.FULL)
+    assert len(build_scene(graph, full).cards) == len(graph.people)
+    with pytest.raises(InvalidInput):
+        build_scene(graph, replace(options, people=frozenset({"no-such-person"})))
+    with pytest.raises(InvalidInput):
+        build_scene(graph, replace(options, people=None))  # neither people nor a window
+
+
+def test_export_request_carries_the_chosen_people():
+    body = {"format": "png", "scope": "view", "people": ["a", "b", "a"]}
+    assert ExportRequest(**body).to_domain().people == frozenset({"a", "b"})
+    assert ExportRequest(format="png").to_domain().people is None
+    with pytest.raises(ValidationError):
+        ExportRequest(format="png", people=["x" * 65])
 
 
 def test_relationship_categories():
@@ -135,3 +191,36 @@ def test_export_api_streams_an_attachment(admin):
     ).json()
     assert preview["image"].startswith("data:image/png;base64,")
     assert preview["output"]["unit"] == "pt" and preview["people"] == 1
+    chosen = {"format": "png", "png_width": 800, "scope": "view", "people": [created["a"]]}
+    assert admin.post("/api/export/preview", chosen).json()["people"] == 1
+
+
+@requires_rendering
+def test_preview_says_when_text_is_cut_short(admin):
+    from famtree.export.render import shortened_cards
+
+    g = GraphBuilder()
+    g.person("Short", profession=("Baker", True))
+    g.person("Long", profession=("Keeper of the family archive and every story in it " * 3, True))
+    options = ExportOptions(ExportFormat.PNG, attributes=["profession"])
+    assert shortened_cards(build_scene(g.build(), options)) == 1
+    assert shortened_cards(build_scene(g.build(), ExportOptions(ExportFormat.PNG))) == 0
+
+    admin.post(
+        "/api/changes",
+        {
+            "people": [
+                {
+                    "ref": "a",
+                    "name": "Only Person",
+                    "attributes": [{"definition": {"id": "description"}, "value": "word " * 80}],
+                }
+            ]
+        },
+    )
+    body = {"format": "png", "png_width": 4000, "attributes": ["description"]}
+    preview = admin.post("/api/export/preview", body).json()
+    assert preview["shortened"] == 1
+    assert any("cut short" in warning for warning in preview["warnings"])
+    body["attributes"] = []
+    assert admin.post("/api/export/preview", body).json()["shortened"] == 0

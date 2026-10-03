@@ -1,5 +1,6 @@
-# Runtime dependencies. PyGObject (Pango) and pycairo come from Debian packages
-# in the image (python3-gi, python3-gi-cairo, python3-cairo); see Dockerfile.
+# Runtime dependencies. PyGObject (Pango), pycairo and Pillow come from Debian
+# packages in the image (python3-gi, python3-gi-cairo, python3-cairo,
+# python3-pil); see Dockerfile.
 fastapi==0.142.2
 uvicorn[standard]==0.54.0
 pydantic==2.13.5

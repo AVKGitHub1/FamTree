@@ -187,6 +187,21 @@ body {
 .button[aria-pressed="true"] {
   box-shadow: inset 0 0 0 2px var(--on-accent);
 }
+.button.is-active {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.button__count {
+  display: inline-block;
+  min-width: 1.4em;
+  margin-left: 0.4em;
+  padding: 0 0.35em;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 0.8em;
+  text-align: center;
+}
 
 .icon-button {
   font: inherit;
@@ -382,11 +397,22 @@ body {
   overflow: hidden;
   background: var(--canvas);
   touch-action: none;
-  cursor: grab;
   user-select: none;
 }
-.viewport:active {
+.viewport.is-pan-ready,
+.viewport.is-pan-ready .card {
+  cursor: grab;
+}
+.viewport.is-pan-ready:active,
+.viewport.is-pan-ready:active .card {
   cursor: grabbing;
+}
+.marquee {
+  position: absolute;
+  z-index: 2;
+  border: 1.5px dashed var(--accent);
+  background: var(--accent-soft);
+  pointer-events: none;
 }
 .stage {
   position: absolute;
@@ -484,6 +510,12 @@ body {
   border-color: var(--accent);
   box-shadow: 0 0 0 4px var(--accent-soft);
 }
+/* In the selection: tinted, with a thicker border. */
+.card.is-marked {
+  border-color: var(--accent);
+  border-width: 2.5px;
+  background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--paper);
+}
 .card.is-on-path {
   border-color: var(--path);
   border-width: 3px;
@@ -512,6 +544,73 @@ body {
   position: absolute;
   right: 3px;
   top: 3px;
+}
+
+/* Profile pictures */
+.avatar {
+  display: block;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--border);
+}
+.card.has-picture {
+  padding-left: 64px;
+}
+.card__avatar {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 44px;
+  height: 44px;
+  pointer-events: none;
+}
+.avatar--large {
+  width: 72px;
+  height: 72px;
+  flex: none;
+}
+.avatar--empty {
+  background: transparent;
+  border: 1.5px dashed var(--card-border);
+}
+.panel__picture {
+  margin: 0 0 0.75rem;
+}
+.panel__picture .avatar--panel {
+  max-width: 100%;
+  max-height: 260px;
+  border-radius: 12px;
+}
+.panel__picture figcaption {
+  margin-top: 0.3rem;
+}
+.picture-input {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+.picture-input legend {
+  width: 100%;
+  margin-bottom: 0.4rem;
+}
+.picture-input__actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.3rem;
+}
+.picture-input__actions .button {
+  cursor: pointer;
+}
+.picture-input__actions:focus-within .button {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.error-text {
+  color: var(--error-ink);
+  font-size: 0.85rem;
 }
 
 .menu__button {
@@ -627,6 +726,10 @@ body {
   display: flex;
   gap: 0.6rem;
   align-items: center;
+}
+.legend__hint {
+  margin: 0.6rem 0 0;
+  color: var(--muted);
 }
 
 .relation-banner {
@@ -745,6 +848,7 @@ body {
 .confirm,
 .consequence,
 .summary,
+.namesake,
 .created-code {
   background: var(--notice-bg);
   border: 1px solid var(--notice-border);
@@ -761,6 +865,13 @@ body {
 .summary {
   background: var(--info-bg);
   border-color: var(--info-border);
+}
+.namesake p {
+  margin: 0;
+}
+.namesake ul {
+  margin: 0.25rem 0;
+  padding-left: 1.25rem;
 }
 
 .relation-list {
@@ -1124,6 +1235,9 @@ tr.is-revoked td:first-child {
 }
 .codes__actions {
   white-space: nowrap;
+}
+.snapshots__table .link-button + .link-button {
+  margin-left: 0.5rem;
 }
 code {
   font-family: ui-monospace, "DejaVu Sans Mono", monospace;

@@ -8,10 +8,13 @@ from conftest import write_key
 
 from famtree import cli
 from famtree.domain import changes, repository
+from famtree.security import sessions
 from famtree.security.passwords import verify_password
-from famtree.storage import meta
-from famtree.storage.backup import create_backup, restore_backup, verify_backup
+from famtree.storage import backup, meta
+from famtree.storage.backup import BackupError, create_backup, restore_backup, verify_backup
 from famtree.storage.bootstrap import StorageUnavailable, load_settings_key, open_storage
+from famtree.storage.database import open_connection
+from famtree.storage.migrations import SCHEMA_VERSION
 
 
 def digest(path):
@@ -98,6 +101,82 @@ def test_backup_restore_round_trip(settings, tmp_path):
     assert names == ["Before Backup"]
 
 
+def test_restore_signs_everyone_out(settings, tmp_path):
+    opened = open_storage(settings)
+    add_person(opened.database, "Someone")
+    with opened.database.write() as conn:
+        sessions.create_session(conn, "admin", None, 24)
+    summary = create_backup(settings, tmp_path / "backups")
+    opened.database.close()
+
+    restore_backup(settings, summary.path)
+    reopened = open_storage(settings)
+    with reopened.database.read() as conn:
+        assert conn.execute("SELECT count(*) FROM sessions").fetchone()[0] == 0
+        assert len(repository.load_graph(conn).people) == 1
+    reopened.database.close()
+    # The backup itself is left as it was.
+    conn = open_connection(summary.path, load_settings_key(settings), wal=False)
+    assert conn.execute("SELECT count(*) FROM sessions").fetchone()[0] == 1
+    conn.close()
+
+
+def live_files(settings):
+    return sorted(p.name for p in settings.data_dir.iterdir() if p.name.startswith("famtree.db"))
+
+
+@pytest.mark.parametrize("failing_step", ["copy", "switch"])
+def test_failed_restore_leaves_the_live_database_in_place(
+    settings, tmp_path, monkeypatch, failing_step
+):
+    opened = open_storage(settings)
+    add_person(opened.database, "Before Backup")
+    summary = create_backup(settings, tmp_path / "backups")
+    add_person(opened.database, "Live Only")
+    opened.database.close()
+    before = digest(settings.db_path)
+    files = live_files(settings)
+
+    def disk_full(*_args, **_kwargs):
+        raise OSError(28, "No space left on device")
+
+    if failing_step == "copy":
+        monkeypatch.setattr(backup.shutil, "copyfile", disk_full)
+    else:
+        real_replace = backup.os.replace
+
+        def replace_failing_at_switch(src, dst):
+            if str(src).endswith(".restoring"):
+                disk_full()
+            real_replace(src, dst)
+
+        monkeypatch.setattr(backup.os, "replace", replace_failing_at_switch)
+
+    with pytest.raises(OSError):
+        restore_backup(settings, summary.path)
+    assert live_files(settings) == files  # no famtree.db.replaced-* or .restoring left
+    assert digest(settings.db_path) == before
+    reopened = open_storage(settings)
+    with reopened.database.read() as conn:
+        names = {p.name for p in repository.load_graph(conn).people.values()}
+    reopened.database.close()
+    assert names == {"Before Backup", "Live Only"}
+
+
+def test_backup_from_a_newer_release_is_refused(settings, tmp_path):
+    open_storage(settings).database.close()
+    summary = create_backup(settings, tmp_path / "b")
+    conn = open_connection(summary.path, load_settings_key(settings), wal=False)
+    conn.execute(
+        "UPDATE meta SET value = ? WHERE key = 'schema_version'", (str(SCHEMA_VERSION + 1),)
+    )
+    conn.close()
+    before = digest(settings.db_path)
+    with pytest.raises(BackupError, match="newer than this release"):
+        restore_backup(settings, summary.path)
+    assert digest(settings.db_path) == before
+
+
 def test_restore_refuses_while_server_holds_the_lock(settings, tmp_path):
     from famtree.storage.bootstrap import acquire_lock, release_lock
 
@@ -118,7 +197,6 @@ def test_backup_needs_the_same_key(settings, tmp_path):
     summary = create_backup(settings, tmp_path / "b")
     other = tmp_path / "other.key"
     write_key(other)
-    from famtree.storage.backup import BackupError
     from famtree.storage.keyfile import load_key
 
     with pytest.raises(BackupError):

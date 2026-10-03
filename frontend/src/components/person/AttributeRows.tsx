@@ -1,6 +1,6 @@
 import { useId, useState } from "react";
 import type { AttributeDefinition, ValueType } from "../../api/types";
-import { VALUE_TYPE_LABELS } from "../../lib/attributes";
+import { CUSTOM_VALUE_TYPES } from "../../lib/attributes";
 import { localKey, rowLabel, type AttributeRow } from "../../lib/attributeRows";
 import { draftFrom } from "../../lib/drafts";
 import { VisibilityChoice } from "../ui/Visibility";
@@ -97,7 +97,7 @@ export function AttributeRows({ rows, definitions, onChange }: Props) {
               onChange={(e) => setNewLabel(e.target.value)}
             />
             <select aria-label="Type of the new detail" value={newType} onChange={(e) => setNewType(e.target.value as ValueType)}>
-              {Object.entries(VALUE_TYPE_LABELS).map(([type, label]) => (
+              {CUSTOM_VALUE_TYPES.map(([type, label]) => (
                 <option key={type} value={type}>
                   {label}
                 </option>

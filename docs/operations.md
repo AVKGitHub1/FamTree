@@ -9,6 +9,7 @@ are run from the repository directory.
 | --- | --- | --- |
 | Encrypted tree | `~/data/FamTree/famtree.db` (+ `-wal`, `-shm` while running) | mounted at `/data` |
 | Backups | `~/data/FamTree/backups/` | encrypted with the same key |
+| Snapshots | inside `famtree.db` | the latest 20 versions of the tree; **Admin → Snapshots** |
 | Encryption key | `~/.config/famtree/encryption.key` | mounted as the secret `/run/secrets/famtree_key` |
 | Settings | `docker-compose.yml` | copied from `docker-compose.yml.example`; gitignored |
 
@@ -85,7 +86,9 @@ docker compose exec famtree famtree-admin backup
 ```
 
 Copy backups **off the host**; a backup on the same disk does not protect you
-from disk failure. Check a backup at any time with:
+from disk failure. Profile pictures and [snapshots](#snapshots) are inside the
+database, so they are in every backup too (typically well under 100 KB per
+picture, about 1 KB per snapshot of a small tree). Check a backup at any time with:
 
 ```bash
 docker compose exec famtree famtree-admin verify /data/backups/famtree-….db
@@ -105,10 +108,38 @@ docker compose run --rm famtree famtree-admin restore /data/backups/famtree-….
 docker compose start famtree
 ```
 
-The restore checks that the backup decrypts with the mounted key and passes an
-integrity check before replacing anything. The previous database is kept as
-`famtree.db.replaced-<timestamp>`. If the service is still running, the
-restore refuses to proceed.
+The restore checks that the backup decrypts with the mounted key, passes an
+integrity check and is not from a newer FamTree release before replacing
+anything. It then copies the backup next to the live database and syncs it
+to disk; only after that is the live database moved aside, so a failed copy
+(a full disk, say) leaves the live tree as it was. The previous database is
+kept as `famtree.db.replaced-<timestamp>`. If the service is still running,
+the restore refuses to proceed.
+
+A restore rolls back access as well as family data: **everyone is signed
+out**, and access codes, guest access, the admin password and the list of
+snapshots become what they were when the backup was taken. A code revoked
+since then works again until you revoke it again, so review **Admin → Access
+codes** and **Admin → Guest access** after restoring. If the admin password is
+unknown, reset it (see above).
+
+To go back to an earlier version of the tree without rolling back access or
+stopping the service, load a [snapshot](#snapshots) instead.
+
+If a restore is interrupted (power loss, for example) and `famtree.db` is
+missing afterwards, the server reports `populated_without_database` and does
+not create a new tree. Put the previous database back under its own name,
+with any `-wal` and `-shm` files beside it, then start the service:
+
+```bash
+cd ~/data/FamTree
+ls famtree.db.replaced-*                      # pick the newest timestamp
+mv famtree.db.replaced-<timestamp> famtree.db
+# only if they exist:
+mv famtree.db.replaced-<timestamp>-wal famtree.db-wal
+mv famtree.db.replaced-<timestamp>-shm famtree.db-shm
+rm -f famtree.db.restoring
+```
 
 To restore a backup copied in from elsewhere, put it in the data directory
 first (for example `~/data/FamTree/backups/`).
@@ -124,6 +155,33 @@ first (for example `~/data/FamTree/backups/`).
 5. Restore: `docker compose run --rm famtree famtree-admin restore /data/backups/famtree-….db --yes`.
 6. Start with `docker compose up -d`. The tree already exists, so no new
    admin password is created; the old one still works.
+
+## Snapshots
+
+Snapshots are earlier versions of the tree that the admin can load from the
+web page (**Admin → Snapshots**), without stopping the service. They are not a
+replacement for backups: they live inside the database, so they are lost
+with it.
+
+- At start-up, and then on the first hourly check of each new day (UTC), the
+  tree is compared with the latest daily snapshot. If it changed, a new
+  snapshot is kept; if not, the latest one is renewed, so the list shows when
+  the tree was last seen like that ("unchanged since …"). An empty tree is
+  not snapshotted. The log says `Daily snapshot created` or `renewed`.
+- A snapshot holds people, their details and pictures, relationships and
+  attribute definitions. Pictures are not copied: a picture is kept for as
+  long as the tree or any snapshot uses it.
+- Loading a snapshot first saves the current tree as a snapshot ("Saved
+  before a load"), so a load can always be undone by loading that one.
+  Access codes, guest access, the admin password and sign-ins are not part
+  of snapshots and stay as they are. Anyone editing from a page that still
+  shows the replaced tree is told it changed and to reload.
+- The latest 20 snapshots are kept, counting both kinds and ranked by when
+  each was last taken; taking another deletes the oldest. The admin can also
+  delete any of them. Each is compressed: a tree of a dozen people and their
+  relationships takes about 1 KB.
+- A snapshot taken by a FamTree release with a different database layout is
+  listed but cannot be loaded.
 
 ## Ports
 
@@ -157,15 +215,25 @@ For a dashboard-managed (token) tunnel, add a public hostname with service
 cloudflared sends `X-Forwarded-Proto: https` and `CF-Connecting-IP`. FamTree
 trusts these headers only from `FAMTREE_TRUSTED_PROXIES` (by default loopback
 and the Docker bridge range). It then marks session cookies `Secure` and
-rate-limits sign-ins by the real client address. Set
-`FAMTREE_COOKIE_SECURE=true` to refuse sessions over plain HTTP entirely.
+rate-limits sign-ins by the real client address.
+
+Set `FAMTREE_COOKIE_SECURE=true` to allow sessions only over HTTPS. Every
+session cookie is then marked `Secure`; a sign-in that does not arrive over
+HTTPS (as reported by a trusted proxy) is refused with "Sign in over HTTPS",
+and session cookies sent over plain HTTP are ignored, so such requests are
+treated as a guest's. Guests can still read the public tree over HTTP. This
+includes the Tailscale route below: with `true`, use the tunnel to sign in.
+The setting does not stop plain-HTTP connections to the port; to keep
+devices off it, use the firewall, Tailscale ACLs or the `ports` mapping (see
+[Ports](#ports)).
 
 ## Tailscale
 
 Devices on your tailnet can open `http://<tailscale-name>:8765`, for example
 `http://avkpi.taile01813.ts.net:8765`, or use the Tailscale IP. The traffic is
 encrypted by WireGuard, so plain HTTP is fine here. Session cookies are not
-marked `Secure` on this route, and sign-in still works. Tailnet addresses are
+marked `Secure` on this route, and sign-in works unless
+`FAMTREE_COOKIE_SECURE` is `true`. Tailnet addresses are
 not trusted proxies, so a tailnet device cannot spoof `X-Forwarded-*` headers.
 
 The tunnel's hostname and the Tailscale name are separate sites to the
@@ -177,8 +245,11 @@ browser, so sign in separately on each.
 - `GET /api/health/ready`: storage is open and decrypted. The Docker health
   check uses this, so `docker ps` shows `unhealthy` when storage is
   unavailable.
-- `docker compose stop` sends SIGTERM. In-flight requests finish, the WAL is
-  checkpointed and the database closed (grace period 20 s).
+- `docker compose stop` sends SIGTERM. In-flight requests get up to 15 s to
+  finish, then the WAL is checkpointed and the database closed. Compose
+  waits 20 s (`stop_grace_period` in the compose file) before it kills the
+  container, which leaves time for that. Without the setting Docker waits
+  only 10 s.
 
 ## Troubleshooting
 
@@ -193,6 +264,10 @@ browser, so sign in separately on each.
 | `data_dir_not_writable` | Ownership mismatch. Set `user` in `docker-compose.yml` to the owner of the data directory (`id -u`:`id -g`). |
 | `locked` | Another FamTree process is using the directory. |
 
+`The daily snapshot failed; it is tried again in an hour` in the log comes
+with the error that caused it. The tree itself is not affected; the next
+hourly check tries again.
+
 `famtree-admin status` confirms the key opens the database and shows the
 number of people, without displaying any names.
 
@@ -206,3 +281,9 @@ docker compose up -d --build    # rebuilds and restarts; schema migrations run o
 
 Migrations only move forward. A newer database is refused by an older
 release, so you never silently lose data by downgrading.
+
+An upgrade that changes the database layout leaves earlier
+[snapshots](#snapshots) listed but no longer loadable, because they were taken
+with the old layout; keep the backup taken before upgrading to go back that
+far. The first upgrade to a release with snapshots creates the snapshot
+storage and takes the first snapshot as it starts.

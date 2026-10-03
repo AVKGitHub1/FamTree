@@ -1,14 +1,16 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ApiError } from "../../api/client";
 import * as api from "../../api/endpoints";
 import type { Person } from "../../api/types";
-import { displayValue } from "../../lib/attributes";
+import { attributeOf, displayValue, PROFILE_PIC, profilePicture } from "../../lib/attributes";
 import { rowsFromPerson, rowsToPayload, type AttributeRow } from "../../lib/attributeRows";
+import { nameKey } from "../../lib/namesakes";
 import { spouseOther, type TreeIndex } from "../../lib/treeIndex";
 import { useToast } from "../../state/toasts";
 import { useTree } from "../../state/tree";
 import { VisibilityBadge } from "../ui/Visibility";
 import { AttributeRows } from "./AttributeRows";
+import { NamesakeWarning } from "./NamesakeWarning";
 import { RelationshipRow } from "./RelationshipRow";
 
 interface Props {
@@ -27,6 +29,7 @@ export function PersonPanel({ index, person, canEdit, onSelect, onAddConnection,
   const parents = index.parentsOf.get(person.id) ?? [];
   const children = index.childrenOf.get(person.id) ?? [];
   const spouses = index.spousesOf.get(person.id) ?? [];
+  const picture = profilePicture(person, index.definitions);
 
   return (
     <aside className="panel" aria-label={`Details for ${person.name}`}>
@@ -42,10 +45,18 @@ export function PersonPanel({ index, person, canEdit, onSelect, onAddConnection,
         <PersonEditor key={person.revision} index={index} person={person} onDone={() => setEditing(false)} />
       ) : (
         <>
+          {picture && (
+            <figure className="panel__picture">
+              <img className="avatar avatar--panel" src={api.pictureUrl(person.id, picture.id, "full")} alt={`Picture of ${person.name}`} />
+              <figcaption>
+                <VisibilityBadge isPublic={attributeOf(person, PROFILE_PIC)?.is_public} />
+              </figcaption>
+            </figure>
+          )}
           <dl className="facts">
             {person.attributes.map((attr) => {
               const def = index.definitions.get(attr.definition_id);
-              if (!def) return null;
+              if (!def || def.value_type === "image") return null;
               return (
                 <div key={attr.definition_id} className="facts__row">
                   <dt>{def.label}</dt>
@@ -126,6 +137,7 @@ function PersonEditor({ index, person, onDone }: { index: TreeIndex; person: Per
   const { reload } = useTree();
   const notify = useToast();
   const [name, setName] = useState(person.name);
+  const self = useMemo(() => [person.id], [person.id]);
   const [rows, setRows] = useState<AttributeRow[]>(() => rowsFromPerson(person, index.definitions));
   const [error, setError] = useState<{ message: string; stale: boolean } | null>(null);
   const [saving, setSaving] = useState(false);
@@ -172,6 +184,14 @@ function PersonEditor({ index, person, onDone }: { index: TreeIndex; person: Per
         <label htmlFor={`name-${person.id}`}>Name (always public)</label>
         <input id={`name-${person.id}`} value={name} maxLength={200} required onChange={(e) => setName(e.target.value)} />
       </div>
+      {nameKey(name) !== nameKey(person.name) && (
+        <NamesakeWarning
+          index={index}
+          name={name}
+          exclude={self}
+          advice="Two people may share a name, but check that this is not the same person entered twice."
+        />
+      )}
       <AttributeRows rows={rows} definitions={index.definitions} onChange={setRows} />
       {error && (
         <div className="error-banner" role="alert">

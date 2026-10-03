@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import itertools
+from collections.abc import Collection, Mapping
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 
 Point = tuple[float, float]
+
+EPS = 0.5  # positions closer than this count as the same
 
 
 @dataclass(frozen=True)
@@ -50,12 +54,78 @@ class Junction:
 class Connector:
     id: str
     type: ConnectorType
-    # Every endpoint person: draw only when all of them are visible.
+    # Every endpoint person. See `visible_part` for drawing a subset of them.
     people: list[str]
     links: list[str]
     paths: list[list[Point]] = field(default_factory=list)
     dots: list[Point] = field(default_factory=list)
     junction: Junction | None = None
+    # Junction families: parent id -> index of that parent's own path to the
+    # junction. Such a branch can be left out on its own.
+    branches: dict[str, int] = field(default_factory=dict)
+    # Families whose children hang from a bus (a horizontal line): the index
+    # of the bus, of the trunk that meets it, and child id -> index of that
+    # child's own drop from the bus, which `visible_part` can leave out.
+    bus: int | None = None
+    trunk: int | None = None
+    drops: dict[str, int] = field(default_factory=dict)
+
+    def visible_part(self, shown: Collection[str]) -> Connector | None:
+        """What to draw when only `shown` people are visible. Everything, when
+        they all are. A family with at least one shown parent and one shown
+        child is drawn in part when the people it misses are junction parents
+        (their branches are left out) or children (their drops are left out
+        and the bus spans only the children left). Otherwise nothing. The web
+        client draws its tree by the same rule (`visibleConnectors`)."""
+        hidden = [p for p in self.people if p not in shown]
+        if not hidden:
+            return self
+        parents = [p for p in hidden if p in self.branches]
+        children = [c for c in hidden if c in self.drops]
+        if len(parents) + len(children) < len(hidden):
+            return None  # a spouse, or a parent without a branch of its own
+        if (parents and len(parents) == len(self.branches)) or (
+            children and len(children) == len(self.drops)
+        ):
+            return None
+
+        paths = list(self.paths)
+        dots = self.dots
+        if children:
+            if self.bus is None or self.trunk is None:
+                return None
+            y = paths[self.bus][0][1]
+            xs = [paths[self.trunk][-1][0]]
+            xs += [paths[i][0][0] for c, i in self.drops.items() if c not in children]
+            lo, hi = min(xs), max(xs)
+            paths[self.bus] = [(lo, y), (hi, y)]
+            dots = sorted({(x, y) for x in xs if lo + EPS < x < hi - EPS})
+
+        dropped = {self.branches[p] for p in parents} | {self.drops[c] for c in children}
+        kept = [i for i in range(len(paths)) if i not in dropped]
+
+        def moved(indices: dict[str, int]) -> dict[str, int]:
+            return {k: kept.index(i) for k, i in indices.items() if i not in dropped}
+
+        return replace(
+            self,
+            paths=[paths[i] for i in kept],
+            dots=dots,
+            branches=moved(self.branches),
+            drops=moved(self.drops),
+            bus=None if self.bus is None else kept.index(self.bus),
+            trunk=None if self.trunk is None else kept.index(self.trunk),
+        )
+
+    def passes(self, x: float, y: float) -> bool:
+        """Whether one of the (orthogonal) paths runs through (x, y)."""
+        for path in self.paths:
+            for (x1, y1), (x2, y2) in itertools.pairwise(path):
+                if min(x1, x2) - 0.01 <= x <= max(x1, x2) + 0.01 and (
+                    min(y1, y2) - 0.01 <= y <= max(y1, y2) + 0.01
+                ):
+                    return True
+        return False
 
 
 @dataclass(frozen=True)
@@ -68,6 +138,21 @@ class Crossing:
     y: float
     over: str
     under: str
+    # The parent whose branch (see `Connector.branches`) each segment is on.
+    over_branch: str | None = None
+    under_branch: str | None = None
+
+    def visible(self, drawn: Mapping[str, Connector], shown_people: Collection[str]) -> bool:
+        """Both lines are still drawn here (`drawn`: connector parts by id),
+        and neither segment is on the branch of a parent who is not shown."""
+        over, under = drawn.get(self.over), drawn.get(self.under)
+        return (
+            over is not None
+            and under is not None
+            and over.passes(self.x, self.y)
+            and under.passes(self.x, self.y)
+            and all(b is None or b in shown_people for b in (self.over_branch, self.under_branch))
+        )
 
 
 @dataclass

@@ -9,10 +9,11 @@ from famtree.api.routes import (
     export,
     health,
     people,
+    pictures,
     relationships,
     tree,
 )
 
 api_router = APIRouter(prefix="/api")
-for module in (health, auth, admin, tree, people, relationships, attributes, export):
+for module in (health, auth, admin, tree, people, pictures, relationships, attributes, export):
     api_router.include_router(module.router)

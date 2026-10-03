@@ -274,17 +274,64 @@ def test_visibility_change_cannot_orphan_and_delete_is_guarded(admin):
     assert {p["name"] for p in preview["blocked_people"]} == {"Founder", "Grandchild"}
     child = next(p for p in admin.tree()["people"] if p["id"] == child_id)
     blocked = admin.delete(
-        f"/api/people/{child_id}", params={"expected_revision": child["revision"]}
+        f"/api/people/{child_id}",
+        params={
+            "expected_revision": child["revision"],
+            "expected_relationships": preview["relationships"],
+        },
     )
     assert blocked.status_code == 422
 
     grandchild = next(p for p in admin.tree()["people"] if p["name"] == "Grandchild")
-    assert admin.get(f"/api/people/{grandchild['id']}/deletion").json()["allowed"] is True
+    preview = admin.get(f"/api/people/{grandchild['id']}/deletion").json()
+    assert preview["allowed"] is True
+    assert [(link["parent"]["name"], link["role"]) for link in preview["parent_links"]] == [
+        ("Child", "father")
+    ]
     deleted = admin.delete(
-        f"/api/people/{grandchild['id']}", params={"expected_revision": grandchild["revision"]}
+        f"/api/people/{grandchild['id']}",
+        params={
+            "expected_revision": grandchild["revision"],
+            "expected_relationships": preview["relationships"],
+        },
     )
     assert deleted.status_code == 200
     assert len(admin.tree()["people"]) == 2
+
+
+def test_deletion_removes_only_the_relationships_its_preview_listed(server, admin):
+    founder = first_person(admin)
+    child_id = add_child(admin, founder, "Child").json()["created"]["c"]
+    other_id = add_child(admin, founder, "Other").json()["created"]["c"]
+    preview = admin.get(f"/api/people/{child_id}/deletion").json()
+    assert preview["allowed"] is True and len(preview["parent_links"]) == 1
+    child = next(p for p in admin.tree()["people"] if p["id"] == child_id)
+
+    # Another editor connects Child to Other; Child's own revision is unchanged.
+    editor = new_client(server)
+    editor.login("code", make_code(admin, "editor")[1])
+    added = editor.post(
+        "/api/changes",
+        {"spouse_links": [{"a": {"id": child_id}, "b": {"id": other_id}, "is_public": True}]},
+    )
+    assert added.status_code == 201, added.text
+    assert next(p for p in admin.tree()["people"] if p["id"] == child_id) == child
+
+    params = {
+        "expected_revision": child["revision"],
+        "expected_relationships": preview["relationships"],
+    }
+    stale = admin.delete(f"/api/people/{child_id}", params=params)
+    assert stale.status_code == 409
+    assert stale.json()["error"]["code"] == "stale_revision"
+    assert len(admin.tree()["spouse_links"]) == 1  # nothing was deleted
+
+    fresh = admin.get(f"/api/people/{child_id}/deletion").json()
+    assert fresh["relationships"] != preview["relationships"]
+    assert [link["spouse"]["name"] for link in fresh["spouse_links"]] == ["Other"]
+    params["expected_relationships"] = fresh["relationships"]
+    assert admin.delete(f"/api/people/{child_id}", params=params).status_code == 200
+    assert admin.tree()["spouse_links"] == []
 
 
 def test_editor_code_can_edit_but_not_admin(server, admin):

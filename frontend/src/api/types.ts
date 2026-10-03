@@ -20,7 +20,8 @@ export interface Session {
   csrf_token: string;
 }
 
-export type ValueType = "text" | "long_text" | "date" | "number" | "url";
+/** "image" is used only by the built-in Profile Pic. */
+export type ValueType = "text" | "long_text" | "date" | "number" | "url" | "image";
 
 export interface PartialDate {
   year: number | null;
@@ -28,7 +29,12 @@ export interface PartialDate {
   day: number | null;
 }
 
-export type AttributeValue = string | number | PartialDate;
+/** A stored picture; fetch it with `pictureUrl`. */
+export interface ImageValue {
+  id: string;
+}
+
+export type AttributeValue = string | number | PartialDate | ImageValue;
 
 export interface PersonAttribute {
   definition_id: string;
@@ -89,6 +95,13 @@ export interface Connector {
   paths: Point[][];
   dots: Point[];
   junction: { x: number; y: number; width: number; height: number } | null;
+  /** Junction families: parent id -> index of that parent's own path to the junction. */
+  branches: Record<string, number>;
+  /** Families whose children hang from a bus: indices of the bus and of the trunk meeting it. */
+  bus: number | null;
+  trunk: number | null;
+  /** child id -> index of that child's own drop from the bus. */
+  drops: Record<string, number>;
 }
 
 export interface Crossing {
@@ -96,6 +109,9 @@ export interface Crossing {
   y: number;
   over: string;
   under: string;
+  /** The parent whose branch each crossing segment is on, if any. */
+  over_branch: string | null;
+  under_branch: string | null;
 }
 
 export interface Layout {
@@ -147,11 +163,26 @@ export interface RelationOutcome {
   message: string | null;
 }
 
+export interface PersonRef {
+  id: string;
+  name: string;
+}
+
+export interface UploadedPicture {
+  id: string;
+  width: number;
+  height: number;
+  /** The card-sized version, as a data URL, to show before saving. */
+  preview: string;
+}
+
 export interface DeletionPreview {
   allowed: boolean;
-  parent_links: string[];
-  spouse_links: string[];
-  blocked_people: { id: string; name: string }[];
+  /** Stands for exactly the relationships listed; deletion is refused if they change. */
+  relationships: string;
+  parent_links: { id: string; parent: PersonRef; child: PersonRef; role: ParentRole }[];
+  spouse_links: { id: string; spouse: PersonRef }[];
+  blocked_people: PersonRef[];
 }
 
 export interface AccessCode {
@@ -161,6 +192,22 @@ export interface AccessCode {
   created_at: string;
   revoked_at: string | null;
   revoked: boolean;
+}
+
+export type SnapshotKind = "daily" | "before_load";
+
+export interface Snapshot {
+  id: string;
+  kind: SnapshotKind;
+  /** When the tree was first seen like this; a daily snapshot is renewed while the tree stays the same. */
+  first_taken: string;
+  taken_at: string;
+  people: number;
+  relationships: number;
+  /** Bytes stored. */
+  size: number;
+  /** False if taken by a FamTree release with a different database layout. */
+  loadable: boolean;
 }
 
 export interface AdminSettings {
@@ -199,6 +246,8 @@ export interface ExportRequest {
   format: ExportFormat;
   scope: ExportScope;
   window: { selected_id: string; above: number; below: number } | null;
+  /** View Only Selected: with the "view" scope, only these people. */
+  people: string[] | null;
   attributes: string[];
   include_parent_links: boolean;
   include_spouse_links: boolean;
@@ -211,6 +260,8 @@ export interface ExportRequest {
 export interface ExportPreview {
   image: string;
   people: number;
+  /** Cards on which a name or value is cut short to fit. */
+  shortened: number;
   warnings: string[];
   output: { width: number; height: number; unit: "px" | "pt" };
   text_size: { value: number; unit: "px" | "pt" };

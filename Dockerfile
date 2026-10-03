@@ -18,7 +18,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         python3 python3-venv \
-        python3-gi python3-gi-cairo python3-cairo gir1.2-pango-1.0 \
+        python3-gi python3-gi-cairo python3-cairo gir1.2-pango-1.0 python3-pil \
         fonts-noto-core fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/* \
     && fc-cache -f

@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useMemo, useReducer } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
 import { ApiError } from "./api/client";
 import { calculateRelation } from "./api/endpoints";
+import type { Session } from "./api/types";
 import { AdminDialog } from "./components/admin/AdminDialog";
 import { AttributesDialog } from "./components/attributes/AttributesDialog";
 import { SignInDialog } from "./components/auth/SignInDialog";
 import { WelcomeScreen } from "./components/auth/WelcomeScreen";
-import { ExportDialog } from "./components/export/ExportDialog";
+import { ExportDialog, type ExportView } from "./components/export/ExportDialog";
 import { Header } from "./components/Header";
 import { AddDialog } from "./components/person/AddDialog";
 import { DeleteDialog } from "./components/person/DeleteDialog";
@@ -27,11 +28,28 @@ export function App() {
   return (
     <ToastProvider>
       <SessionProvider>
-        <TreeProvider>
-          <Shell />
-        </TreeProvider>
+        <AccessScope />
       </SessionProvider>
     </ToastProvider>
+  );
+}
+
+/** What the caller may see: a change of role or of guest access changes it. */
+function accessOf(session: Session | null): string {
+  return session ? `${session.role}|${session.capabilities.join(",")}` : "";
+}
+
+/** Everything derived from the tree (the tree itself, selection, relation
+ * results, export previews, open dialogs and their pending requests) belongs
+ * to one access level. When it changes, all of it is discarded at once, so the
+ * next person at this browser never sees what the previous one could, not even
+ * while the new tree loads or if loading it fails. */
+function AccessScope() {
+  const { session } = useSession();
+  return (
+    <TreeProvider key={accessOf(session)}>
+      <Shell />
+    </TreeProvider>
   );
 }
 
@@ -47,21 +65,50 @@ function Shell() {
 
   // Drop references to people who are no longer visible (deleted, or signed out).
   useEffect(() => {
-    if (index && ui.selectedId && !index.people.has(ui.selectedId)) dispatch({ type: "forget", id: ui.selectedId });
-    if (index && ui.relation.stage === "result") {
+    if (!index) return;
+    for (const id of new Set([ui.selectedId, ...ui.selection, ...(ui.viewOnly ?? [])])) {
+      if (id && !index.people.has(id)) dispatch({ type: "forget", id });
+    }
+    if (ui.relation.stage === "result") {
       const { first, second } = ui.relation;
       if (!index.people.has(first) || !index.people.has(second)) dispatch({ type: "relationCancel" });
     }
-  }, [index, ui.selectedId, ui.relation]);
+  }, [index, ui.selectedId, ui.selection, ui.viewOnly, ui.relation]);
+
+  // A relation result describes the tree it was calculated on: recalculate it
+  // whenever the tree is reloaded (after an edit, for example).
+  const relationBasis = useRef(index);
+  useEffect(() => {
+    if (relationBasis.current === index) return;
+    relationBasis.current = index;
+    dispatch({ type: "relationRecalculate" });
+  }, [index]);
 
   // --- generation window ---------------------------------------------------
   const selectedRow = ui.selectedId && index ? (index.rowOf.get(ui.selectedId) ?? null) : null;
   const limits = selectedRow != null && index ? limitsFor(selectedRow, index.maxRow) : null;
   const genWindow = limits ? resolveWindow(ui.window, limits) : null;
+  const generationsHidden = Boolean(genWindow && limits && !isFull(genWindow, limits));
   const shown = index && genWindow && selectedRow != null ? visibleRange(selectedRow, genWindow, index.maxRow) : null;
   const lo = shown?.lo ?? 0;
   const hi = shown?.hi ?? index?.maxRow ?? 0;
   const range = useMemo(() => ({ lo, hi }), [lo, hi]);
+
+  // What Export calls the current view.
+  const above = genWindow?.above ?? 0;
+  const below = genWindow?.below ?? 0;
+  const focusId = genWindow ? ui.selectedId : null;
+  const exportView = useMemo(
+    (): ExportView | null =>
+      focusId || ui.viewOnly
+        ? {
+            window: focusId ? { selected_id: focusId, above, below } : null,
+            generationsHidden,
+            people: ui.viewOnly ? [...ui.viewOnly] : null,
+          }
+        : null,
+    [focusId, above, below, generationsHidden, ui.viewOnly],
+  );
 
   // --- relation flow ---------------------------------------------------------
   const relation = ui.relation;
@@ -111,10 +158,15 @@ function Shell() {
   const onActivate = useCallback(
     (id: string) => {
       if (relation.stage === "pick") dispatch({ type: "relationPick", id });
-      else dispatch({ type: "select", id, openDetails: true });
+      else {
+        dispatch({ type: "select", id, openDetails: true });
+        dispatch({ type: "setSelection", ids: [id] });
+      }
     },
     [relation.stage],
   );
+  const onToggle = useCallback((id: string) => dispatch({ type: "toggleSelected", id }), []);
+  const onSelect = useCallback((ids: string[]) => dispatch({ type: "setSelection", ids }), []);
 
   const menuFor = useCallback(
     (id: string): MenuItem[] => {
@@ -143,10 +195,11 @@ function Shell() {
       const person = index.people.get(id);
       if (!person) return "";
       const parts = [person.name, ...cardLines(person, index.definitions)];
+      if (ui.selection.has(id)) parts.push("selected");
       if (relation.stage === "pick") parts.push(relation.first ? "Press Enter to choose as the second person" : "Press Enter to choose as the first person");
       return parts.join(", ");
     },
-    [index, relation],
+    [index, relation, ui.selection],
   );
 
   const panelOpen = (ui.detailsOpen && ui.selectedId != null) || relation.stage === "result";
@@ -206,7 +259,9 @@ function Shell() {
         <TreeView
           index={index}
           range={range}
+          only={ui.viewOnly}
           selectedId={ui.selectedId}
+          selection={ui.selection}
           picks={picks}
           highlight={highlight}
           occlusion={occlusion}
@@ -214,6 +269,8 @@ function Shell() {
           focusScale={small ? 0.75 : null}
           menuFor={menuFor}
           onActivate={onActivate}
+          onToggle={onToggle}
+          onSelect={onSelect}
           onBackground={() => relation.stage !== "pick" && dispatch({ type: "deselect" })}
           describe={describe}
         />
@@ -241,6 +298,10 @@ function Shell() {
         hasPeople={hasPeople}
         relationActive={relation.stage !== "idle"}
         onRelation={() => dispatch(relation.stage === "idle" ? { type: "relationStart" } : { type: "relationCancel" })}
+        selectedCount={ui.selection.size}
+        viewingSelected={ui.viewOnly != null}
+        onViewSelected={() => dispatch({ type: "viewSelected" })}
+        onDefaultView={() => dispatch({ type: "viewDefault" })}
         onAdd={openAdd}
         onExport={() => dispatch({ type: "openDialog", dialog: { kind: "export" } })}
         onAttributes={() => dispatch({ type: "openDialog", dialog: { kind: "attributes" } })}
@@ -310,11 +371,7 @@ function Shell() {
       {ui.dialog?.kind === "export" && index && (
         <ExportDialog
           index={index}
-          view={
-            ui.selectedId && genWindow && limits
-              ? { selectedId: ui.selectedId, window: genWindow, filtered: !isFull(genWindow, limits) }
-              : null
-          }
+          view={exportView}
           onClose={() => dispatch({ type: "closeDialog" })}
         />
       )}

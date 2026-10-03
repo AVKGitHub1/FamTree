@@ -8,6 +8,7 @@ from typing import Any
 from famtree.domain.model import AttributeDefinition, FamilyGraph, ParentLink, Person, SpouseLink
 from famtree.domain.relation import RelationOutcome, RelationResult
 from famtree.domain.search import SearchHit
+from famtree.domain.snapshots import SnapshotInfo
 from famtree.layout import Layout
 from famtree.security.access_codes import AccessCode
 from famtree.security.permissions import Viewer
@@ -92,11 +93,23 @@ def layout(lay: Layout) -> dict[str, Any]:
                     "width": c.junction.width,
                     "height": c.junction.height,
                 },
+                "branches": c.branches,
+                "bus": c.bus,
+                "trunk": c.trunk,
+                "drops": c.drops,
             }
             for c in lay.connectors
         ],
         "crossings": [
-            {"x": x.x, "y": x.y, "over": x.over, "under": x.under} for x in lay.crossings
+            {
+                "x": x.x,
+                "y": x.y,
+                "over": x.over,
+                "under": x.under,
+                "over_branch": x.over_branch,
+                "under_branch": x.under_branch,
+            }
+            for x in lay.crossings
         ],
     }
 
@@ -161,6 +174,19 @@ def access_code(code: AccessCode) -> dict[str, Any]:
         "created_at": code.created_at,
         "revoked_at": code.revoked_at,
         "revoked": code.revoked_at is not None,
+    }
+
+
+def snapshot(info: SnapshotInfo) -> dict[str, Any]:
+    return {
+        "id": info.id,
+        "kind": info.kind.value,
+        "first_taken": info.first_taken,
+        "taken_at": info.taken_at,
+        "people": info.people,
+        "relationships": info.relationships,
+        "size": info.size,
+        "loadable": info.loadable,
     }
 
 
