@@ -100,6 +100,30 @@ Example nightly backup that keeps 30 days (`crontab -e` on the host):
 30 3 * * * cd /home/USER/code/FamTree && docker compose exec -T famtree famtree-admin backup >/dev/null && find /home/USER/data/FamTree/backups -name 'famtree-*.db' -mtime +30 -delete
 ```
 
+## Profile pictures
+
+Editors add or replace a picture through the built-in **Profile Pic** detail.
+Choosing a file uploads it immediately, but it becomes the person's picture
+only when their details are saved. Removing the detail and saving removes it
+from the current tree. New picture values start private.
+
+The browser tries to resize a chosen image to at most 1600 pixels on its
+longest side and upload a JPEG. If it cannot decode the file, the original
+file is sent for server validation. The server accepts JPEG, PNG and WebP,
+up to **15 MiB and 50 million pixels**, applies orientation, removes metadata
+and puts transparency on white. It keeps a JPEG up to 640 pixels on its
+longest side and a 128 × 128 square thumbnail, not the original photo. Keep
+original photos separately if you need their full resolution.
+
+Pictures are encrypted inside the database and included in backups. An
+unattached upload has a one-hour grace period for saving the person's
+details. After that it is eligible for deletion when a later cleanup runs;
+this is not an hourly deletion timer. Cleanup runs during uploads, person
+saves/deletions and relevant snapshot operations. A picture still referenced
+by the tree or any snapshot is retained. Old pictures in snapshots are not
+served through the current person's picture endpoint unless restored to the
+current tree.
+
 ## Restoring a backup
 
 ```bash
@@ -163,23 +187,36 @@ web page (**Admin → Snapshots**), without stopping the service. They are not a
 replacement for backups: they live inside the database, so they are lost
 with it.
 
-- At start-up, and then on the first hourly check of each new day (UTC), the
-  tree is compared with the latest daily snapshot. If it changed, a new
+- At start-up and every hour, the server checks whether a daily snapshot is
+  due. If the latest daily snapshot was taken or renewed for the current UTC
+  date, even a restart does not capture further edits that day. On the next
+  due check, the tree is compared with the latest daily snapshot. If it changed, a new
   snapshot is kept; if not, the latest one is renewed, so the list shows when
   the tree was last seen like that ("unchanged since …"). An empty tree is
-  not snapshotted. The log says `Daily snapshot created` or `renewed`.
+  skipped and checked again the next hour. Revisions and edit timestamps
+  alone do not count as changes. The log says `Daily snapshot created` or
+  `renewed`. There is no snapshot of every edit or of days the server was off;
+  use an operator backup when you need an immediate recovery point.
 - A snapshot holds people, their details and pictures, relationships and
   attribute definitions. Pictures are not copied: a picture is kept for as
   long as the tree or any snapshot uses it.
 - Loading a snapshot first saves the current tree as a snapshot ("Saved
   before a load"), so a load can always be undone by loading that one.
   Access codes, guest access, the admin password and sign-ins are not part
-  of snapshots and stay as they are. Anyone editing from a page that still
-  shows the replaced tree is told it changed and to reload.
+  of snapshots and stay as they are. Attribute and relationship visibility
+  does return to the snapshot's values along with the family data. Anyone
+  editing from a page that still shows the replaced tree is told it changed
+  and to reload.
+- The tree saved before a load may be empty; loading that saved snapshot
+  returns to the empty tree. If loading the oldest snapshot when 20 are
+  already kept, saving the current tree can remove that oldest list entry;
+  the loaded family data still becomes the current tree.
 - The latest 20 snapshots are kept, counting both kinds and ranked by when
   each was last taken; taking another deletes the oldest. The admin can also
   delete any of them. Each is compressed: a tree of a dozen people and their
   relationships takes about 1 KB.
+- Deleting the latest daily snapshot does not pause the job. If no daily
+  snapshot for today remains, the next check can create or renew one again.
 - A snapshot taken by a FamTree release with a different database layout is
   listed but cannot be loaded.
 

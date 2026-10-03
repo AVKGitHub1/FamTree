@@ -70,6 +70,12 @@ metadata such as GPS location, and are stored in the encrypted database (a
 640 px version and a 128 px card thumbnail); they are served only to callers
 who may see them, and never cached by the browser.
 
+To add one, open **Edit details → Add a detail → Profile Pic**. Choosing a
+file uploads it; **Save** attaches it to the person, and **Cancel** leaves the
+saved details unchanged. The larger stored image keeps its proportions;
+tree cards use a square crop. The original photo is not preserved. See
+[picture formats and storage](docs/operations.md#profile-pictures).
+
 ## Using the tree
 
 | To | With a mouse | On a touch screen |
@@ -88,6 +94,13 @@ The Legend repeats the mouse and touch controls.
 tree, with the lines between them; **Export → Current view** then exports only
 them. **Default View** brings back the full tree, with every generation, fitted
 to the screen.
+
+The **Theme** selector starts at **System**, following the device's light or
+dark preference, and remembers your choice in this browser. **Export →
+Current view** follows the generation filters and View Only Selected; panning
+or zooming does not crop the exported people. To include pictures, select
+**Profile Pic** in the export dialog. People without a picture you may see
+get initials instead.
 
 Adding a person, or renaming one, to a name that is already in the tree shows
 a warning with what tells the namesakes apart (birth date, parents and so on).

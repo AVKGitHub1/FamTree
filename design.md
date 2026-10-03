@@ -37,10 +37,11 @@ Framework, database, and graph-layout library selection are implementation decis
 
 ### Snapshots
 
-- At startup and then once a day, compare the tree with the latest daily snapshot. Save a new snapshot if the tree differs; otherwise renew the latest one, recording when the tree was first and last seen that way. Do not snapshot an empty tree.
+- Check for a due daily snapshot at startup and every hour, using UTC dates. If the latest daily snapshot was taken or renewed that day, further checks and restarts do nothing until the next UTC day. When due, compare the tree with the latest daily snapshot: save a new snapshot if the family data differs; otherwise renew the latest one, recording when it was first and last seen that way. Revisions and edit timestamps alone do not count as changes. Skip an empty tree and check again the next hour.
 - A snapshot holds family data only: people, attribute values with their visibility, attribute definitions, relationships, and references to the pictures in use. A picture stays stored while any snapshot uses it. Credentials, access codes, sessions, and settings are not part of a snapshot.
 - Store snapshots inside the encrypted database. Keep the latest 20, counting both kinds and ordered by when each was last taken; taking another deletes the oldest.
 - The admin can list, delete, and load snapshots. Loading first saves the current tree as a snapshot, then replaces the tree in one transaction. Access codes, sessions, guest access, and the admin password are unchanged. Loaded records get new revisions, so an edit made from a page that still shows the replaced tree is rejected as stale.
+- The snapshot saved before a load can contain an empty tree, so loading into an empty installation can also be undone. It counts toward the same 20-snapshot limit. Loading the oldest snapshot at that limit can remove its list entry; its family data becomes the current tree.
 - A snapshot taken with a different database schema is listed but cannot be loaded.
 - Snapshots supplement backups rather than replace them: they are lost with the database.
 
@@ -95,6 +96,14 @@ A public viewer code grants the same data access as a guest. Revoking a code rem
 - Renaming a definition preserves existing values. Reject incompatible type changes while values exist. Individual values keep their own visibility setting.
 - Record revisions for editable records so simultaneous edits cannot silently overwrite each other; a stale save asks the editor to reload and reconcile.
 
+### Profile pictures
+
+- Provide one optional built-in **Profile Pic** attribute per person, with the same per-value visibility rule as other details. It starts private and appears on the card and in the details panel when the caller may see it. Custom attribute types remain short text, long text, date, number, and link; additional image attributes are not supported.
+- Choosing a picture uploads it immediately; saving the person's details attaches it to that person. Canceling the edit does not change the saved picture. A pending upload must finish before the details can be saved.
+- Where the browser can decode the selected image, resize it to at most 1600 pixels on its longest side and convert it to JPEG before upload. The server independently accepts JPEG, PNG, or WebP, limited to 15 MiB and 50 million pixels, and re-encodes it without camera metadata. Apply orientation and flatten transparency onto white. Do not preserve the original uploaded file.
+- Store a JPEG up to 640 pixels on its longest side and a 128 × 128 square thumbnail inside the encrypted database. Cards use the thumbnail; the details panel uses the larger version. Serve pictures through an authorized person's endpoint with browser caching disabled.
+- Export pictures only when **Profile Pic** is selected among the attributes. Use a square crop from the stored larger image; where no permitted picture is available, show initials derived from the public name. This does not distinguish a missing picture from a private one.
+
 ### Relationships
 
 The family tree is a graph: multiple parents and spouses mean it is not necessarily a strict mathematical tree.
@@ -129,7 +138,7 @@ Edits and deletions must preserve graph validity and required public connections
 - Multiple parents and spouses can create conflicting generation constraints. Prioritize parent-above-child placement and clearly route exceptional connections when all same-row preferences cannot hold. Do not alter family data to simplify the drawing.
 - Keep placement deterministic for the same graph and preserve the selected person and viewport when possible after an edit.
 - Include empty, loading, error, and no-visible-results states. Guests seeing an empty tree cannot create its first person.
-- add support for dark, light, sepia themes
+- Offer light, dark, and sepia themes, plus a default **System** choice that follows the device's light/dark preference. Remember the choice in that browser for the site's origin. Exports use a white background regardless of the interface theme.
 
 ### Connection lines
 
