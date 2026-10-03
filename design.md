@@ -58,6 +58,7 @@ Use whole-tree roles; permissions are not scoped to individual people or attribu
 A public viewer code grants the same data access as a guest. Revoking a code removes its privileges; the holder can still access public information as a guest.
 
 - A guest has read access only to public information. A valid code grants only its assigned permissions; the admin has all permissions.
+- On first access, ask for an access code; admin sign-in is a separate button. The admin can turn guest access off, in which case guests can read nothing and must enter a code.
 - Check authorization on the server for every read, search, mutation, relation calculation, and export. Hiding a button is not authorization.
 - Exchange passwords and codes for sessions rather than including them in URLs. Protect session cookies from script access, require secure transport for internet use, protect mutations against cross-site requests, and rate-limit authentication attempts.
 - Do not record passwords, full codes, private attributes, or exported family data in ordinary logs.

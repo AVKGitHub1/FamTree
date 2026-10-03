@@ -1,0 +1,1 @@
+"""Encrypted persistent storage (SQLCipher)."""

@@ -1,0 +1,36 @@
+services:
+  famtree:
+    container_name: famtree
+    image: famtree:latest
+    build: .
+    # Run as the owner of the data folder and key file (`id -u` / `id -g`).
+    user: "1000:1000"
+    ports:
+      # All interfaces, IPv4 and IPv6: cloudflared uses http://localhost:8765,
+      # tailnet devices http://<tailscale-name>:8765. If 8765 is taken, change
+      # the left-hand number.
+      - "8765:8080"
+    volumes:
+      # Encrypted tree, WAL and backups, in a real folder on the host. Create it
+      # first (`mkdir -p ~/data/FamTree`) so it belongs to you, not root.
+      - ${HOME}/data/FamTree:/data
+    secrets:
+      # The encryption key, mounted separately and never stored beside the data.
+      - famtree_key
+    # environment:
+      # Session cookies are Secure when the request came over HTTPS (cloudflared
+      # says so). "true" refuses sessions over plain HTTP, Tailscale included:
+      # FAMTREE_COOKIE_SECURE: "true"
+    # Hardening: read-only image, no extra privileges.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+
+secrets:
+  famtree_key:
+    # Created once with scripts/init-key.sh. Back it up separately: without it
+    # the data cannot be decrypted.
+    file: ${HOME}/.config/famtree/encryption.key

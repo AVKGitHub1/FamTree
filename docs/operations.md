@@ -1,0 +1,208 @@
+# Operating FamTree
+
+The commands below assume the default Compose setup (service `famtree`) and
+are run from the repository directory.
+
+## What lives where
+
+| Item | Host location (default) | Notes |
+| --- | --- | --- |
+| Encrypted tree | `~/data/FamTree/famtree.db` (+ `-wal`, `-shm` while running) | mounted at `/data` |
+| Backups | `~/data/FamTree/backups/` | encrypted with the same key |
+| Encryption key | `~/.config/famtree/encryption.key` | mounted as the secret `/run/secrets/famtree_key` |
+| Settings | `docker-compose.yml` | copied from `docker-compose.yml.example`; gitignored |
+
+The container runs as the compose file's `user` (your uid:gid), with a read-only root filesystem and all
+capabilities dropped. Everything it writes is created with mode 600 inside a
+700 directory.
+
+## Encryption key
+
+- The key is 64 hexadecimal characters (256 bits). `scripts/init-key.sh`
+  creates it with mode 600 and refuses to overwrite an existing key.
+- It is **not** in the image and **not** next to the data. Keep it that way.
+- **Back it up separately** (for example in a password manager or on an
+  offline USB stick). Data backups are useless without it.
+- **If the key is lost, the encrypted data cannot be recovered.** There is no
+  back door.
+- Encryption at rest protects copies of the disk and backups. It does not
+  protect against someone who controls both the running server and its key.
+- If the data directory holds a database that the mounted key cannot decrypt,
+  the server refuses to use it. It never initialises a replacement tree, and
+  the file is left untouched. The site reports "unavailable", the health
+  check fails, and the log states the reason.
+
+## First launch and the admin password
+
+When the data directory is empty, the server creates a new tree and prints
+the admin password **once** to the container's standard output. It is not
+available through any web endpoint, and it is never printed again on restart.
+
+Read it with `docker logs famtree`. Treat that first-launch log as sensitive:
+after noting the password, run `docker compose up -d --force-recreate` so the
+running container no longer carries it in its log. Once signed in, change the password under
+**Admin → Admin password**; this signs out other admin sessions.
+
+### Resetting a forgotten admin password
+
+You need host access:
+
+```bash
+docker compose exec famtree famtree-admin reset-admin-password
+```
+
+This prints a new password and signs out all admin sessions. The encryption
+key and the family data are not changed. Access codes keep working.
+
+## Access codes
+
+The admin creates codes under **Admin → Access codes**, choosing a label and
+a role (public viewer, family viewer or editor). Codes can be revealed later,
+re-assigned to another role, revoked or deleted. Revoking or deleting a code
+ends the sessions it started on their next request; the holder is then
+treated as a guest. Codes and passwords are exchanged for an HttpOnly,
+SameSite=Strict session cookie and never appear in URLs. Sign-in attempts are
+rate-limited per client and globally.
+
+Visitors who are not signed in first see an access-code screen, with a
+separate **Admin sign in** button. Under **Admin → Guest access** the admin
+chooses what they get without a code:
+
+- **The public tree** (default): the screen also offers *Continue without a
+  code*, and the browser remembers that choice until someone signs in there.
+- **Nothing**: the server refuses every tree, search, relation and export
+  request without a code, and the screen only asks for one. Hand out public
+  viewer codes to people who should see just the public tree.
+
+## Backups
+
+A backup is a consistent, standalone, encrypted copy. It is safe to take
+while FamTree is running:
+
+```bash
+docker compose exec famtree famtree-admin backup
+# -> /data/backups/famtree-YYYYMMDDTHHMMSSZ.db  (host: ~/data/FamTree/backups/)
+```
+
+Copy backups **off the host**; a backup on the same disk does not protect you
+from disk failure. Check a backup at any time with:
+
+```bash
+docker compose exec famtree famtree-admin verify /data/backups/famtree-….db
+```
+
+Example nightly backup that keeps 30 days (`crontab -e` on the host):
+
+```
+30 3 * * * cd /home/USER/code/FamTree && docker compose exec -T famtree famtree-admin backup >/dev/null && find /home/USER/data/FamTree/backups -name 'famtree-*.db' -mtime +30 -delete
+```
+
+## Restoring a backup
+
+```bash
+docker compose stop famtree
+docker compose run --rm famtree famtree-admin restore /data/backups/famtree-….db --yes
+docker compose start famtree
+```
+
+The restore checks that the backup decrypts with the mounted key and passes an
+integrity check before replacing anything. The previous database is kept as
+`famtree.db.replaced-<timestamp>`. If the service is still running, the
+restore refuses to proceed.
+
+To restore a backup copied in from elsewhere, put it in the data directory
+first (for example `~/data/FamTree/backups/`).
+
+### Moving to a new host
+
+1. On the new host, install Docker and clone the repository.
+2. Copy the key to `~/.config/famtree/encryption.key` (mode 600), or point
+   `secrets.famtree_key.file` in `docker-compose.yml` at it.
+3. Copy the latest backup to `~/data/FamTree/backups/` on the new host.
+4. `cp docker-compose.yml.example docker-compose.yml` (adjust it if needed),
+   then `docker compose build`.
+5. Restore: `docker compose run --rm famtree famtree-admin restore /data/backups/famtree-….db --yes`.
+6. Start with `docker compose up -d`. The tree already exists, so no new
+   admin password is created; the old one still works.
+
+## Ports
+
+The host port is the left-hand number of `ports` in `docker-compose.yml`
+(default `8765`). No port can be guaranteed free. If it is taken, `docker
+compose up` fails with "port is already allocated": change the number and run
+it again. Inside the container the server listens on 8080; if that port were
+somehow taken, the server would exit with the same instruction.
+
+The port is published on every interface, IPv4 and IPv6, as in the dashboard
+project. That means it is reachable at `localhost` (cloudflared), on the
+tailnet, and on the LAN, all over plain HTTP. To keep it off the LAN, limit
+the port with your firewall or Tailscale ACLs, or prefix the mapping in
+`docker-compose.yml` with a specific address.
+
+## Cloudflare tunnel
+
+cloudflared runs on the host and forwards the subdomain to the local port.
+For a locally managed tunnel, the ingress rule looks like this:
+
+```yaml
+ingress:
+  - hostname: tree.example.com
+    service: http://localhost:8765
+  - service: http_status:404
+```
+
+For a dashboard-managed (token) tunnel, add a public hostname with service
+`HTTP` and URL `localhost:8765`.
+
+cloudflared sends `X-Forwarded-Proto: https` and `CF-Connecting-IP`. FamTree
+trusts these headers only from `FAMTREE_TRUSTED_PROXIES` (by default loopback
+and the Docker bridge range). It then marks session cookies `Secure` and
+rate-limits sign-ins by the real client address. Set
+`FAMTREE_COOKIE_SECURE=true` to refuse sessions over plain HTTP entirely.
+
+## Tailscale
+
+Devices on your tailnet can open `http://<tailscale-name>:8765`, for example
+`http://avkpi.taile01813.ts.net:8765`, or use the Tailscale IP. The traffic is
+encrypted by WireGuard, so plain HTTP is fine here. Session cookies are not
+marked `Secure` on this route, and sign-in still works. Tailnet addresses are
+not trusted proxies, so a tailnet device cannot spoof `X-Forwarded-*` headers.
+
+The tunnel's hostname and the Tailscale name are separate sites to the
+browser, so sign in separately on each.
+
+## Health checks and shutdown
+
+- `GET /api/health/live`: the process is up.
+- `GET /api/health/ready`: storage is open and decrypted. The Docker health
+  check uses this, so `docker ps` shows `unhealthy` when storage is
+  unavailable.
+- `docker compose stop` sends SIGTERM. In-flight requests finish, the WAL is
+  checkpointed and the database closed (grace period 20 s).
+
+## Troubleshooting
+
+`docker compose logs famtree` shows `STORAGE UNAVAILABLE (<reason>)`:
+
+| Reason | Meaning and fix |
+| --- | --- |
+| `key_unavailable` | The key file is missing or malformed. Check `secrets.famtree_key.file` in `docker-compose.yml` and that it holds 64 hex characters. |
+| `decrypt_failed` | The database exists but this key does not open it. Mount the original key; the data was not modified. |
+| `populated_without_database` | The data directory has files but no `famtree.db`. FamTree will not create a new tree over them. Restore a backup or empty the directory. |
+| `data_dir_not_mounted` | `/data` is not a mounted volume, so data would be lost with the container. Check the `volumes:` entry. |
+| `data_dir_not_writable` | Ownership mismatch. Set `user` in `docker-compose.yml` to the owner of the data directory (`id -u`:`id -g`). |
+| `locked` | Another FamTree process is using the directory. |
+
+`famtree-admin status` confirms the key opens the database and shows the
+number of people, without displaying any names.
+
+## Upgrading
+
+```bash
+git pull
+docker compose exec famtree famtree-admin backup
+docker compose up -d --build    # rebuilds and restarts; schema migrations run on start
+```
+
+Migrations only move forward. A newer database is refused by an older
+release, so you never silently lose data by downgrading.

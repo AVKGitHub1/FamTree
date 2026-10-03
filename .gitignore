@@ -34,3 +34,7 @@ run-local.bat
 
 # Local assistant environment and working rules
 /CLAUDE.md
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
