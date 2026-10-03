@@ -107,6 +107,7 @@ def test_private_viewer_sees_everything_but_cannot_edit(server, admin, family):
         assert secret in text
     relation = viewer.post("/api/relation", {"a": family["f"], "b": family["h"]}).json()
     assert [r["statement"] for r in relation["results"]] == ["Founder is Hidden’s father."]
+    assert [r["marathi"] for r in relation["results"]] == [["वडील", "बाबा"]]
     assert (
         viewer.patch(
             f"/api/relationships/parent/{family['private_link']}",

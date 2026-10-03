@@ -3,7 +3,7 @@
 A self-hosted family tree you can share. It shows a generation-based
 diagram with right-angle connection lines, separates public from private
 information, calculates relationships ("A is B's first cousin twice
-removed") and exports to PNG or PDF. You can select part of the tree to view
+removed", with the Marathi name on request) and exports to PNG or PDF. You can select part of the tree to view
 or export on its own, and the admin can go back to a daily snapshot of the
 tree. All data is encrypted at rest. The interface has light, dark and sepia
 themes; exports are always on white paper for printing.
@@ -137,7 +137,7 @@ backend/                Python 3.13, FastAPI
   famtree/
     storage/            SQLCipher database, key file, first launch, migrations, backup
     security/           permissions, sessions, access codes, passwords, rate limits
-    domain/             people/relationship model, validation, edits, search, relations, snapshots
+    domain/             people/relationship model, validation, edits, search, relations, Marathi names, snapshots
     layout/             generation rows, ordering, x positions, orthogonal routing
     export/             export scene + cairo/Pango rendering to PNG/PDF (in memory)
     api/                HTTP routes, request schemas, response shaping

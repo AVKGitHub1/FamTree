@@ -909,6 +909,17 @@ body {
 .relation-none {
   font-weight: 600;
 }
+.relation-marathi {
+  display: grid;
+  gap: 0.1rem;
+  margin-top: 0.25rem;
+  padding-top: 0.35rem;
+  border-top: 1px dashed var(--border);
+}
+.relation-marathi__name {
+  font-size: 1.05rem;
+  font-weight: 600;
+}
 
 /* --- forms ------------------------------------------------------------------- */
 .field {

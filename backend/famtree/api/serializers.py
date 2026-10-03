@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from famtree.domain.marathi import marathi_names
 from famtree.domain.model import AttributeDefinition, FamilyGraph, ParentLink, Person, SpouseLink
 from famtree.domain.relation import RelationOutcome, RelationResult
 from famtree.domain.search import SearchHit
@@ -138,6 +139,7 @@ def relation_result(result: RelationResult, graph: FamilyGraph, a: str, b: str) 
         "kind": result.kind.value,
         "label": result.label,
         "statement": statement,
+        "marathi": marathi_names(graph, result),
         "distance_a": result.distance_a,
         "distance_b": result.distance_b,
         "cousin_degree": result.cousin_degree,

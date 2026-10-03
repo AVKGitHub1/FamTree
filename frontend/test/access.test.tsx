@@ -69,6 +69,7 @@ const father: RelationOutcome = {
       kind: "parent",
       label: "father",
       statement: "Parent is Relative's father",
+      marathi: ["वडील", "बाबा"],
       distance_a: 0,
       distance_b: 1,
       cousin_degree: null,

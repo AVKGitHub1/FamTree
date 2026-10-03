@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { RelationOutcome, RelationResult } from "../../api/types";
 
 interface BannerProps {
@@ -52,7 +53,27 @@ function PathText({ result }: { result: RelationResult }) {
   );
 }
 
+/** The most familiar name first, then the other ways of saying it. */
+function MarathiNames({ names }: { names: string[] }) {
+  if (names.length === 0) return <span className="relation-marathi muted">No Marathi relationship name found.</span>;
+  const [first, ...others] = names;
+  return (
+    <span className="relation-marathi">
+      <span lang="mr" className="relation-marathi__name">
+        {first}
+      </span>
+      {others.length > 0 && (
+        <span className="hint">
+          Also <span lang="mr">{others.join(", ")}</span>
+        </span>
+      )}
+    </span>
+  );
+}
+
 export function RelationResults({ outcome, error, active, onActivate, onAgain, onClose, onSwap }: ResultsProps) {
+  const [marathi, setMarathi] = useState(false);
+  const found = outcome != null && outcome.results.length > 0;
   return (
     <aside className="panel relation-results" aria-label="Relation result">
       <div className="panel__header">
@@ -68,7 +89,7 @@ export function RelationResults({ outcome, error, active, onActivate, onAgain, o
         </p>
       )}
       {outcome && outcome.results.length === 0 && <p className="relation-none">{outcome.message}</p>}
-      {outcome && outcome.results.length > 0 && (
+      {found && (
         <>
           {outcome.results.length > 1 && (
             <p className="hint">
@@ -85,6 +106,7 @@ export function RelationResults({ outcome, error, active, onActivate, onAgain, o
                       Through {result.common_ancestors.map((a) => a.name).join(" and ")}
                     </span>
                   )}
+                  {marathi && <MarathiNames names={result.marathi} />}
                 </button>
                 {i === active && <PathText result={result} />}
               </li>
@@ -93,6 +115,18 @@ export function RelationResults({ outcome, error, active, onActivate, onAgain, o
         </>
       )}
       <div className="panel__actions">
+        {found && (
+          <button
+            type="button"
+            className={marathi ? "button is-active" : "button"}
+            lang="mr"
+            title="Show the relationship in Marathi"
+            aria-pressed={marathi}
+            onClick={() => setMarathi(!marathi)}
+          >
+            मराठीत नातं
+          </button>
+        )}
         <button type="button" className="button" onClick={onSwap} disabled={!outcome}>
           Swap order
         </button>

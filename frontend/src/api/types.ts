@@ -148,6 +148,8 @@ export interface RelationResult {
   kind: string;
   label: string;
   statement: string;
+  /** Marathi names for the relationship, most familiar first; empty if there is none. */
+  marathi: string[];
   distance_a: number | null;
   distance_b: number | null;
   cousin_degree: number | null;
