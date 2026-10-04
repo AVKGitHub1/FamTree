@@ -267,7 +267,7 @@ devices off it, use the firewall, Tailscale ACLs or the `ports` mapping (see
 ## Tailscale
 
 Devices on your tailnet can open `http://<tailscale-name>:8765`, for example
-`http://avkpi.taile01813.ts.net:8765`, or use the Tailscale IP. The traffic is
+`http://raspberrypi.tail1234.ts.net:8765`, or use the Tailscale IP. The traffic is
 encrypted by WireGuard, so plain HTTP is fine here. Session cookies are not
 marked `Secure` on this route, and sign-in works unless
 `FAMTREE_COOKIE_SECURE` is `true`. Tailnet addresses are
