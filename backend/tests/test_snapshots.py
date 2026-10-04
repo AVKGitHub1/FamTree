@@ -11,6 +11,7 @@ from test_pictures import add_person, upload
 from famtree import clock
 from famtree.daily import DailySnapshots
 from famtree.domain import repository, snapshots
+from famtree.domain.attributes import GENDER, ValueType
 from famtree.storage import migrations
 from famtree.storage.bootstrap import open_storage
 
@@ -187,9 +188,14 @@ def test_upgrading_keeps_snapshots_loadable_and_remembers_deleted_revisions(sett
         old_release.setattr(migrations, "MIGRATIONS", migrations.MIGRATIONS[:3])
         old_release.setattr(migrations, "SCHEMA_VERSION", 3)
         old_release.setattr(snapshots, "SCHEMA_VERSION", 3)
+        old_release.setattr(
+            snapshots, "TREE_TABLES", {**snapshots.TREE_TABLES, "people": ("id", "name")}
+        )
         database = open_storage(settings).database
         with database.write() as conn:
             person_id = repository.insert_person(conn, "Before Upgrade")
+            # An editor's own attribute, named like the built-in one to come.
+            own = repository.insert_definition(conn, "gender", ValueType.TEXT)
             snapshot_id = snapshots.take(conn, snapshots.SnapshotKind.DAILY)
         database.close()
 
@@ -197,12 +203,21 @@ def test_upgrading_keeps_snapshots_loadable_and_remembers_deleted_revisions(sett
     try:
         with database.write() as conn:
             assert migrations.current_version(conn) == migrations.SCHEMA_VERSION
+            assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
             assert [s.loadable for s in snapshots.list_snapshots(conn)] == [True]
+            # Upgraded like the tree, so an unchanged tree renews it.
+            stored = conn.execute("SELECT digest FROM snapshots").fetchone()["digest"]
+            assert stored == snapshots._digest(snapshots._capture(conn))
+            labels = {d.id: d.label for d in repository.load_definitions(conn).values()}
+            assert labels[GENDER] == "Gender" and labels[own] == "gender (custom)"
             repository.touch_person(conn, person_id)
             repository.touch_person(conn, person_id)
             repository.delete_person(conn, person_id)
             snapshots.load(conn, snapshot_id)
             assert repository.person_revision(conn, person_id) == 4  # above the deleted 3
+            definitions = repository.load_definitions(conn)
+            assert definitions[GENDER].builtin and definitions[own].label == "gender (custom)"
+            assert repository.load_graph(conn).people[person_id].sibling_order is None
     finally:
         database.close()
 

@@ -341,3 +341,53 @@ def test_editor_code_can_edit_but_not_admin(server, admin):
     editor.login("code", value)
     founder = editor.tree()["people"][0]
     assert add_child(editor, founder["id"], "By Editor").status_code == 201
+
+
+def test_editors_arrange_children_of_the_same_parents(server, api, admin):
+    founder = first_person(admin)
+    kids = [add_child(admin, founder, name).json()["created"]["c"] for name in ("A", "B", "C")]
+    other = add_child(admin, kids[0], "Grandchild").json()["created"]["c"]
+    before = {p["id"]: p["revision"] for p in admin.tree()["people"]}
+
+    arranged = [kids[2], kids[0], kids[1]]
+    assert admin.put("/api/sibling-order", {"children": arranged}).status_code == 200
+    nodes = admin.tree()["layout"]["nodes"]
+    assert sorted(kids, key=lambda k: nodes[k]["x"]) == arranged
+    # The drawing only: nobody's details become stale.
+    assert {p["id"]: p["revision"] for p in admin.tree()["people"]} == before
+
+    def refused(children):
+        return admin.put("/api/sibling-order", {"children": children}).json()["error"]["code"]
+
+    assert refused(kids[:2]) == "stale_revision"  # C was left out
+    assert refused([kids[0], other]) == "stale_revision"  # different parents
+    assert refused([kids[0], kids[0]]) == "invalid_input"
+    assert refused([founder, "nobody"]) == "not_found"
+    assert api.put("/api/sibling-order", {"children": kids}).status_code == 401
+    _, value = make_code(admin, "private_viewer")
+    viewer = new_client(server)
+    viewer.login("code", value)
+    assert viewer.put("/api/sibling-order", {"children": kids}).status_code == 403
+    nodes = admin.tree()["layout"]["nodes"]
+    assert sorted(kids, key=lambda k: nodes[k]["x"]) == arranged
+
+
+def test_gender_is_a_built_in_choice(admin):
+    definitions = {d["id"]: d for d in admin.get("/api/attributes").json()["definitions"]}
+    assert definitions["gender"]["builtin"] and definitions["gender"]["value_type"] == "gender"
+    founder = first_person(admin, attributes=[{"definition": {"id": "gender"}, "value": "female"}])
+    person = admin.tree()["people"][0]
+    assert person["attributes"] == [
+        {"definition_id": "gender", "value": "female", "is_public": False}
+    ]
+    wrong = admin.put(
+        f"/api/people/{founder}",
+        {
+            "expected_revision": person["revision"],
+            "name": "Founder",
+            "attributes": [{"definition": {"id": "gender"}, "value": "Woman"}],
+        },
+    )
+    assert wrong.status_code == 422
+    own = admin.post("/api/attributes", {"label": "Sex", "value_type": "gender"})
+    assert own.status_code == 422

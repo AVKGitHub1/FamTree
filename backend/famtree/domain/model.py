@@ -45,6 +45,9 @@ class Person:
     name: str
     revision: int
     attributes: dict[str, AttributeValue] = field(default_factory=dict)
+    # Place among their siblings, as an editor arranged them (see
+    # changes.set_sibling_order); None until then.
+    sibling_order: int | None = None
 
 
 @dataclass(frozen=True)
@@ -120,6 +123,18 @@ class FamilyGraph:
 
     def spouses_of(self, person_id: str) -> list[str]:
         return [link.other(person_id) for link in self.spouse_links_of(person_id)]
+
+    def siblings_by_parents(self, person_id: str) -> list[str]:
+        """Everyone (`person_id` included) whose parents are exactly
+        `person_id`'s, in stable (seq) order; [] for someone without parents."""
+        parents = set(self.parents_of(person_id))
+        if not parents:
+            return []
+        candidates = {c for p in parents for c in self.children_of(p)}
+        return sorted(
+            (c for c in candidates if set(self.parents_of(c)) == parents),
+            key=lambda c: self.people[c].seq,
+        )
 
     def ordered_people(self) -> list[Person]:
         return sorted(self.people.values(), key=lambda p: p.seq)

@@ -5,6 +5,7 @@ import type { Person } from "../../api/types";
 import { attributeOf, displayValue, PROFILE_PIC, profilePicture } from "../../lib/attributes";
 import { rowsFromPerson, rowsToPayload, type AttributeRow } from "../../lib/attributeRows";
 import { nameKey } from "../../lib/namesakes";
+import { siblingMove } from "../../lib/siblings";
 import { spouseOther, type TreeIndex } from "../../lib/treeIndex";
 import { useToast } from "../../state/toasts";
 import { useTree } from "../../state/tree";
@@ -12,6 +13,7 @@ import { VisibilityBadge } from "../ui/Visibility";
 import { AttributeRows } from "./AttributeRows";
 import { NamesakeWarning } from "./NamesakeWarning";
 import { RelationshipRow } from "./RelationshipRow";
+import { useSiblingMove } from "./useSiblingMove";
 
 interface Props {
   index: TreeIndex;
@@ -30,6 +32,9 @@ export function PersonPanel({ index, person, canEdit, onSelect, onAddConnection,
   const children = index.childrenOf.get(person.id) ?? [];
   const spouses = index.spousesOf.get(person.id) ?? [];
   const picture = profilePicture(person, index.definitions);
+  const { move, busy: moving } = useSiblingMove(index);
+  const canMoveLeft = canEdit && siblingMove(index, person.id, "left") != null;
+  const canMoveRight = canEdit && siblingMove(index, person.id, "right") != null;
 
   return (
     <aside className="panel" aria-label={`Details for ${person.name}`}>
@@ -92,6 +97,17 @@ export function PersonPanel({ index, person, canEdit, onSelect, onAddConnection,
               </>
             )}
           </div>
+          {(canMoveLeft || canMoveRight) && (
+            <div className="panel__order" role="group" aria-label={`Place of ${person.name} among their siblings`}>
+              <span className="muted">Among their siblings:</span>
+              <button type="button" className="button" disabled={!canMoveLeft || moving} onClick={() => void move(person.id, "left")}>
+                ← Move left
+              </button>
+              <button type="button" className="button" disabled={!canMoveRight || moving} onClick={() => void move(person.id, "right")}>
+                Move right →
+              </button>
+            </div>
+          )}
         </>
       )}
 

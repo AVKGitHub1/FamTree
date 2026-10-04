@@ -302,3 +302,66 @@ def test_five_hundred_people_lay_out_quickly():
     assert_orthogonal(layout)
     assert_no_overlapping_cards(layout)
     assert elapsed < 3.0, f"layout took {elapsed:.2f}s"
+
+
+def left_to_right(layout, *pids):
+    return sorted(pids, key=lambda pid: layout.nodes[pid].x)
+
+
+def married_children():
+    """Two siblings, each married to an only child of another couple. Younger's
+    in-laws come first, so with fewest crossings Younger is drawn on the left."""
+    g = GraphBuilder()
+    spouses = {}
+    for family in ("Y", "E"):
+        in_law_father, in_law_mother = g.people(f"{family} father", f"{family} mother")
+        g.spouse(in_law_father, in_law_mother)
+        spouses[family] = g.person(f"{family} spouse")
+        g.parents(spouses[family], in_law_father, in_law_mother)
+    father, mother = g.people("Father", "Mother")
+    g.spouse(father, mother)
+    elder, younger = g.people("Elder", "Younger")
+    for child, family in ((elder, "E"), (younger, "Y")):
+        g.parents(child, father, mother)
+        g.spouse(child, spouses[family])
+    return g, elder, younger
+
+
+def test_arranged_siblings_keep_their_order():
+    g = GraphBuilder()
+    father = g.person("Father")
+    first, second, third = g.people("First", "Second", "Third")
+    for child in (first, second, third):
+        g.parent(father, child)
+    assert left_to_right(compute_layout(g.build()), first, second, third) == [
+        first,
+        second,
+        third,
+    ]
+    g.arrange(third, first, second)
+    layout = compute_layout(g.build())
+    assert left_to_right(layout, first, second, third) == [third, first, second]
+    assert_orthogonal(layout)
+    assert_no_overlapping_cards(layout)
+
+
+def test_arranged_order_holds_against_crossing_reduction():
+    for order in itertools.permutations(married_children()[1:]):
+        g, elder, younger = married_children()
+        g.arrange(*order)
+        layout = compute_layout(g.build())
+        assert left_to_right(layout, elder, younger) == list(order)
+        assert_no_overlapping_cards(layout)
+
+
+def test_children_added_after_arranging_come_last():
+    g = GraphBuilder()
+    father = g.person("Father")
+    older, newer = g.people("Older", "Newer")
+    g.parent(father, older)
+    g.parent(father, newer)
+    g.arrange(newer, older)
+    late = g.person("Late", birth_date=({"year": 1900, "month": None, "day": None}, True))
+    g.parent(father, late)
+    layout = compute_layout(g.build())
+    assert left_to_right(layout, older, newer, late) == [newer, older, late]

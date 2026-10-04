@@ -49,12 +49,16 @@ def compute_layout(graph: FamilyGraph, config: LayoutConfig | None = None) -> La
     config = config or LayoutConfig()
 
     def sibling_key(pid: str) -> tuple:
+        """Siblings an editor has arranged come in that order, before any
+        added since; the others by birth date, then as they were entered."""
         person = graph.people[pid]
+        if person.sibling_order is not None:
+            return (0, person.sibling_order, person.seq)
         value = person.attributes.get(BIRTH_DATE)
         birth = UNKNOWN_BIRTH
         if value is not None and BIRTH_DATE in graph.definitions:
             birth = PartialDate.from_json(value.value).sort_key()
-        return (birth, person.seq)
+        return (1, birth, person.seq)
 
     components: list[LayeredComponent] = []
     offset = config.margin

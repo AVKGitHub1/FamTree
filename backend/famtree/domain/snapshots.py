@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import zlib
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Literal
@@ -40,7 +41,7 @@ class SnapshotKind(StrEnum):
 # with what makes two trees the same: not ordering numbers, revisions or times.
 TREE_TABLES: dict[str, tuple[str, ...]] = {
     "attribute_definitions": ("id", "label", "value_type", "builtin"),
-    "people": ("id", "name"),
+    "people": ("id", "name", "sibling_order"),
     "attribute_values": ("person_id", "definition_id", "value", "is_public"),
     "parent_links": ("parent_id", "child_id", "role", "is_public"),
     "spouse_links": ("person_a", "person_b", "is_public"),
@@ -180,6 +181,28 @@ def take_daily(conn: Connection) -> Literal["created", "renewed"] | None:
     )
     _keep_images(conn, latest["id"])
     return "renewed"
+
+
+def upgrade_stored(
+    conn: Connection, old_version: int, new_version: int, upgrade: Callable[[Tree], None]
+) -> None:
+    """For a migration: bring snapshots taken with schema `old_version` to
+    `new_version`, changing each stored tree in place with `upgrade`.
+
+    `_digest` describes the latest schema's tree, so it is recomputed only by
+    the last migration. A digest left behind costs at most one daily snapshot
+    of an unchanged tree."""
+    rows = conn.execute(
+        "SELECT id, digest, data FROM snapshots WHERE schema_version = ?", (old_version,)
+    ).fetchall()
+    for row in rows:
+        tree: Tree = json.loads(zlib.decompress(row["data"]))
+        upgrade(tree)
+        digest = _digest(tree) if new_version == SCHEMA_VERSION else row["digest"]
+        conn.execute(
+            "UPDATE snapshots SET schema_version = ?, digest = ?, data = ? WHERE id = ?",
+            (new_version, digest, _encode(tree), row["id"]),
+        )
 
 
 def list_snapshots(conn: Connection) -> list[SnapshotInfo]:

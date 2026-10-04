@@ -24,6 +24,10 @@ LOCATION = "location"
 PROFESSION = "profession"
 DESCRIPTION = "description"
 PROFILE_PIC = "profile_pic"
+GENDER = "gender"
+
+# Values of the built-in Gender attribute, with their display text.
+GENDERS = {"female": "Female", "male": "Male", "other": "Other"}
 
 _IMAGE_ID = re.compile(r"[0-9a-f]{16}")
 
@@ -36,6 +40,8 @@ class ValueType(StrEnum):
     URL = "url"
     # Only the built-in Profile Pic: a reference to a stored picture.
     IMAGE = "image"
+    # Only the built-in Gender: one of GENDERS.
+    GENDER = "gender"
 
 
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
@@ -100,6 +106,10 @@ def normalize_value(value_type: ValueType, raw: Any) -> Any:
             if not isinstance(image_id, str) or not _IMAGE_ID.fullmatch(image_id):
                 raise InvalidInput("Upload a picture.")
             return {"id": image_id}
+        case ValueType.GENDER:
+            if not isinstance(raw, str) or raw not in GENDERS:
+                raise InvalidInput("Choose female, male or other.")
+            return raw
     raise InvalidInput(f"Unknown value type {value_type!r}.")
 
 
@@ -107,6 +117,8 @@ def custom_type_problem(value_type: ValueType) -> str | None:
     """Why editors may not give their own attributes this type, if they may not."""
     if value_type is ValueType.IMAGE:
         return "Pictures are kept only in the built-in Profile Pic attribute."
+    if value_type is ValueType.GENDER:
+        return "Gender is kept only in the built-in Gender attribute."
     return None
 
 
@@ -118,6 +130,8 @@ def display_text(value_type: ValueType, value: Any) -> str:
         return f"{value:g}" if isinstance(value, float) else str(value)
     if value_type is ValueType.IMAGE:
         return "picture"
+    if value_type is ValueType.GENDER:
+        return GENDERS.get(value, str(value))
     return str(value)
 
 

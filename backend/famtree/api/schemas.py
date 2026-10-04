@@ -137,6 +137,10 @@ class PersonUpdate(Strict):
     definitions: list[DefinitionIn] = Field(default_factory=list, max_length=20)
 
 
+class SiblingOrder(Strict):
+    children: list[Annotated[str, Id]] = Field(min_length=2, max_length=500)
+
+
 class ParentLinkUpdate(Strict):
     expected_revision: int
     role: ParentRole | None = None

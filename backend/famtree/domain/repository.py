@@ -89,8 +89,11 @@ def load_graph(conn: Connection) -> FamilyGraph:
             name=row["name"],
             revision=row["revision"],
             attributes=values.get(row["id"], {}),
+            sibling_order=row["sibling_order"],
         )
-        for row in conn.execute("SELECT id, seq, name, revision FROM people ORDER BY seq")
+        for row in conn.execute(
+            "SELECT id, seq, name, revision, sibling_order FROM people ORDER BY seq"
+        )
     }
     parent_links = [
         _parent_link(row) for row in conn.execute("SELECT * FROM parent_links ORDER BY seq")
@@ -188,6 +191,15 @@ def replace_attribute_values(
         "INSERT INTO attribute_values (person_id, definition_id, value, is_public) "
         "VALUES (?, ?, ?, ?)",
         [(person_id, v.definition_id, _dump(v.value), int(v.is_public)) for v in values],
+    )
+
+
+def set_sibling_order(conn: Connection, people: list[str]) -> None:
+    """Number `people` 0, 1, 2… in the given order. This arranges the drawing
+    only, so revisions are left alone and no edit in progress becomes stale."""
+    conn.executemany(
+        "UPDATE people SET sibling_order = ?, updated_at = ? WHERE id = ?",
+        [(i, clock.now_iso(), pid) for i, pid in enumerate(people)],
     )
 
 

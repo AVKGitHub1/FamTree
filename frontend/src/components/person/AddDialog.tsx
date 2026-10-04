@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { ApiError } from "../../api/client";
 import * as api from "../../api/endpoints";
 import type { ChangeSet, ParentRole, Ref } from "../../api/types";
-import { BIRTH_DATE, LOCATION, PROFESSION } from "../../lib/attributes";
+import { BIRTH_DATE, GENDER, genderOf, LOCATION, PROFESSION, roleForGender } from "../../lib/attributes";
 import { localKey, rowsToPayload, type AttributeRow } from "../../lib/attributeRows";
 import { draftFrom } from "../../lib/drafts";
 import { nameOf, type TreeIndex } from "../../lib/treeIndex";
@@ -25,10 +25,16 @@ interface Props {
 }
 
 function quickRows(index: TreeIndex): AttributeRow[] {
-  return [BIRTH_DATE, LOCATION, PROFESSION].flatMap((id) => {
+  return [GENDER, BIRTH_DATE, LOCATION, PROFESSION].flatMap((id) => {
     const def = index.definitions.get(id);
     return def ? [{ key: localKey(), definition: { id }, draft: draftFrom(def.value_type, null), isPublic: false }] : [];
   });
+}
+
+/** The gender chosen so far for a person being created. */
+function draftGender(rows: AttributeRow[]): string | null {
+  const row = rows.find((r) => "id" in r.definition && r.definition.id === GENDER);
+  return row?.draft.type === "gender" ? row.draft.text : null;
 }
 
 export function AddDialog({ index, anchorId, onClose, onCreated }: Props) {
@@ -42,7 +48,8 @@ export function AddDialog({ index, anchorId, onClose, onCreated }: Props) {
   const [relation, setRelation] = useState<Relation | null>(null);
   const [other, setOther] = useState<Picked | null>(null);
   const [otherRows, setOtherRows] = useState<AttributeRow[]>(() => quickRows(index));
-  const [role, setRole] = useState<ParentRole | null>(null);
+  // A role the editor picked, for the parent it was picked for.
+  const [chosenRole, setChosenRole] = useState<{ parent: string; role: ParentRole } | null>(null);
   const [isPublic, setIsPublic] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -60,6 +67,22 @@ export function AddDialog({ index, anchorId, onClose, onCreated }: Props) {
   const parentIsOther = anchorId ? relation === "parent" : relation === "child";
   const parentName = parentIsOther ? otherName : subjectName;
   const childName = parentIsOther ? subjectName : otherName;
+
+  // Until the editor picks one, the role follows the parent's recorded gender.
+  const recordedGender = (id: string) => {
+    const person = index.people.get(id);
+    return person ? genderOf(person, index.definitions) : null;
+  };
+  const [parentKey, parentGender] = parentIsOther
+    ? other?.kind === "existing"
+      ? [other.id, recordedGender(other.id)]
+      : ["other", other ? draftGender(otherRows) : null]
+    : anchorId
+      ? [anchorId, recordedGender(anchorId)]
+      : ["subject", draftGender(newRows)];
+  const suggestedRole = roleForGender(parentGender);
+  const role = chosenRole?.parent === parentKey ? chosenRole.role : suggestedRole;
+  const setRole = (r: ParentRole) => setChosenRole({ parent: parentKey, role: r });
 
   const summary = useMemo(() => {
     if (!relation || !other) return null;
@@ -207,6 +230,9 @@ export function AddDialog({ index, anchorId, onClose, onCreated }: Props) {
                 <label>
                   <input type="radio" name="role" checked={role === "father"} onChange={() => setRole("father")} /> Father
                 </label>
+                {suggestedRole && chosenRole?.parent !== parentKey && (
+                  <p className="hint">Chosen from {parentName}’s recorded gender. Change it if it does not apply.</p>
+                )}
               </fieldset>
             )}
 

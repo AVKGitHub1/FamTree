@@ -1,6 +1,7 @@
 import { useId, useState } from "react";
 import { ApiError } from "../../api/client";
 import { uploadPicture } from "../../api/endpoints";
+import { GENDER_LABELS } from "../../lib/attributes";
 import { MONTHS, type DateFields } from "../../lib/dates";
 import type { Draft, PictureDraft } from "../../lib/drafts";
 import { prepareForUpload } from "../../lib/pictures";
@@ -52,7 +53,16 @@ export function ValueInput({ label, draft, onChange }: Props) {
   return (
     <div className="field">
       <label htmlFor={id}>{label}</label>
-      {draft.type === "long_text" ? (
+      {draft.type === "gender" ? (
+        <select {...common}>
+          <option value="">Not recorded</option>
+          {Object.entries(GENDER_LABELS).map(([value, text]) => (
+            <option key={value} value={value}>
+              {text}
+            </option>
+          ))}
+        </select>
+      ) : draft.type === "long_text" ? (
         <textarea rows={3} maxLength={4000} {...common} />
       ) : (
         <input

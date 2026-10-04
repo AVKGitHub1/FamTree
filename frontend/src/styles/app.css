@@ -787,6 +787,17 @@ body {
   gap: 0.5rem;
   margin: 0.75rem 0;
 }
+.panel__order {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.5rem;
+  margin: 0 0 0.75rem;
+}
+.panel__order > span {
+  flex-basis: 100%;
+  font-size: 0.85rem;
+}
 .panel__danger {
   margin-top: 1.5rem;
   padding-top: 0.75rem;
@@ -1068,7 +1079,8 @@ details > summary {
   border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: 0 8px 24px rgb(0 0 0 / 0.16);
-  max-height: 280px;
+  /* A fixed height: the list does not resize as suggestions come and go. */
+  height: min(280px, 40dvh);
   overflow-y: auto;
 }
 .picker__list li {
@@ -1079,6 +1091,10 @@ details > summary {
 }
 .picker__list li.is-active {
   background: var(--accent-soft);
+}
+.picker__list li.is-stale {
+  opacity: 0.5;
+  cursor: default;
 }
 .picker__name {
   font-weight: 600;
@@ -1131,12 +1147,16 @@ details > summary {
 
 /* --- dialogs ------------------------------------------------------------------ */
 .dialog {
+  --dialog-top: min(6dvh, 3rem);
   border: 1px solid var(--border);
   background: var(--paper);
   border-radius: 14px;
   padding: 0;
   width: min(560px, calc(100vw - 2rem));
-  max-height: calc(100dvh - 2rem);
+  /* Held near the top instead of centred, so when its content grows or
+     shrinks (search suggestions, a preview) only the bottom edge moves. */
+  margin: var(--dialog-top) auto auto;
+  max-height: calc(100dvh - var(--dialog-top) - 1rem);
   box-shadow: 0 20px 60px rgb(0 0 0 / 0.3);
   color: var(--ink);
 }

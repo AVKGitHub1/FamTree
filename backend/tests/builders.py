@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from famtree.domain.attributes import ValueType
@@ -23,6 +24,7 @@ BUILTIN_DEFINITIONS = {
         "description", 4, "Description", ValueType.LONG_TEXT, True, 1
     ),
     "profile_pic": AttributeDefinition("profile_pic", 5, "Profile Pic", ValueType.IMAGE, True, 1),
+    "gender": AttributeDefinition("gender", 6, "Gender", ValueType.GENDER, True, 1),
 }
 
 
@@ -45,6 +47,11 @@ class GraphBuilder:
         }
         self._people[pid] = Person(pid, self._next(), name, 1, values)
         return pid
+
+    def arrange(self, *pids: str) -> None:
+        """Siblings in the order an editor put them."""
+        for order, pid in enumerate(pids):
+            self._people[pid] = replace(self._people[pid], sibling_order=order)
 
     def people(self, *names: str) -> list[str]:
         return [self.person(name) for name in names]

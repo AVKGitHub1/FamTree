@@ -1,6 +1,7 @@
 """Left-to-right order within rows: barycentric sweeps that keep the ordering
 with the fewest edge crossings. Spouse clusters move as blocks and may only
-be mirrored, which preserves spouse adjacency."""
+be mirrored, which preserves spouse adjacency. Children an editor has
+arranged keep their order throughout."""
 
 from __future__ import annotations
 
@@ -21,6 +22,10 @@ def order_rows(component: LayeredComponent) -> None:
         down[u].append(v)
         up[v].append(u)
     row_ids = sorted(rows)
+    arranged: dict[int, list[list[str]]] = defaultdict(list)
+    for family in component.families:
+        if family.arranged:
+            arranged[family.child_row].append(family.children)
 
     def positions() -> dict[str, int]:
         pos: dict[str, int] = {}
@@ -48,10 +53,13 @@ def order_rows(component: LayeredComponent) -> None:
             ]
             bary[item.key] = sum(values) / len(values) if values else pos[item.slots[0].id]
         rows[r].sort(key=lambda item: (bary[item.key], item.sort_key))
+        _keep_arranged(rows[r], arranged[r], component.slots)
         for item in rows[r]:
             if len(item.slots) > 1:
                 _maybe_mirror(item, bary[item.key], neighbours, pos)
 
+    for r in row_ids:
+        _keep_arranged(rows[r], arranged[r], component.slots)
     best = _snapshot(rows)
     best_crossings = crossings()
     for _ in range(SWEEPS):
@@ -65,6 +73,20 @@ def order_rows(component: LayeredComponent) -> None:
         if current < best_crossings:
             best, best_crossings = _snapshot(rows), current
     _restore(rows, best)
+
+
+def _keep_arranged(items: list[Item], families: list[list[str]], slots: dict[str, Slot]) -> None:
+    """Put each arranged family's children back in their order, in the places
+    their blocks hold in `items`. A family with two children in one block is
+    left as it is, and where two families' orders conflict (children of one
+    married to children of the other) the later family's wins."""
+    for children in families:
+        blocks = [slots[c].item for c in children]
+        if len({id(b) for b in blocks}) < len(blocks):
+            continue
+        where = {id(item): i for i, item in enumerate(items)}
+        for place, block in zip(sorted(where[id(b)] for b in blocks), blocks, strict=True):
+            items[place] = block
 
 
 def _maybe_mirror(

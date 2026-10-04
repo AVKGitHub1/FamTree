@@ -236,6 +236,8 @@ class Family:
     kind: FamilyKind
     links: list[str]
     spouse_link: str | None = None
+    # The children are in an order an editor chose, which ordering keeps.
+    arranged: bool = False
     # parent id -> dummy slot ids for rows parent_row+1 .. origin_row
     parent_chains: dict[str, list[str]] = field(default_factory=dict)
     # dummy slot ids for rows origin_row+1 .. child_row-1

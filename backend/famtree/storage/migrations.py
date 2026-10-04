@@ -70,6 +70,77 @@ def _remember_deleted_revisions(conn: Connection) -> None:
     conn.execute("UPDATE snapshots SET schema_version = 4 WHERE schema_version = 3")
 
 
+def _add_gender_and_sibling_order(conn: Connection) -> None:
+    """Version 5: the built-in Gender attribute, and `people.sibling_order`,
+    where an editor's left-to-right order of a family's children is kept."""
+    old = "'url', 'image')"
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'attribute_definitions'"
+    ).fetchone()
+    if row["sql"].count(old) != 1:
+        raise RuntimeError("attribute_definitions does not have the expected type constraint")
+    # Widened in place as in version 2 (_add_pictures).
+    schema_version = conn.execute("PRAGMA schema_version").fetchone()[0]
+    conn.execute("PRAGMA writable_schema = ON")
+    try:
+        conn.execute(
+            "UPDATE sqlite_master SET sql = ? "
+            "WHERE type = 'table' AND name = 'attribute_definitions'",
+            (row["sql"].replace(old, "'url', 'image', 'gender')"),),
+        )
+        conn.execute(f"PRAGMA schema_version = {schema_version + 1}")
+    finally:
+        conn.execute("PRAGMA writable_schema = OFF")
+
+    # An editor's own "Gender" attribute keeps its values under a new name.
+    labels = [r["label"] for r in conn.execute("SELECT label FROM attribute_definitions")]
+    for r in conn.execute(
+        "SELECT id, label FROM attribute_definitions WHERE label_key = 'gender'"
+    ).fetchall():
+        label = _free_label(f"{r['label']} (custom)", labels)
+        conn.execute(
+            "UPDATE attribute_definitions SET label = ?, label_key = ?, revision = revision + 1 "
+            "WHERE id = ?",
+            (label, label.casefold(), r["id"]),
+        )
+    conn.execute(
+        "INSERT INTO attribute_definitions (id, label, label_key, value_type, builtin, created_at) "
+        "VALUES ('gender', 'Gender', 'gender', 'gender', 1, '1970-01-01T00:00:00Z')"
+    )
+    conn.execute("ALTER TABLE people ADD COLUMN sibling_order INTEGER")
+
+    # Snapshots taken before this get the same changes, so they stay loadable
+    # and loading one keeps the Gender attribute.
+    gender = dict(
+        conn.execute("SELECT * FROM attribute_definitions WHERE id = 'gender'").fetchone()
+    )
+
+    def upgrade(tree: dict) -> None:
+        definitions = tree["attribute_definitions"]
+        labels = [d["label"] for d in definitions]
+        for d in definitions:
+            if d["label_key"] == "gender":
+                d["label"] = _free_label(f"{d['label']} (custom)", labels)
+                d["label_key"] = d["label"].casefold()
+        definitions.append(gender)
+        for person in tree["people"]:
+            person["sibling_order"] = None
+
+    from famtree.domain.snapshots import upgrade_stored  # imports this module
+
+    upgrade_stored(conn, 4, 5, upgrade)
+
+
+def _free_label(label: str, taken: list[str]) -> str:
+    keys = {t.casefold() for t in taken}
+    candidate, n = label, 1
+    while candidate.casefold() in keys:
+        n += 1
+        candidate = f"{label} {n}"
+    taken.append(candidate)
+    return candidate
+
+
 # Each entry upgrades the schema by one version: SQL statements, or a function
 # for steps SQL alone cannot express. Never edit a released entry; append a new
 # one instead.
@@ -195,6 +266,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     CREATE INDEX snapshot_images_image ON snapshot_images(image_id);
     """,
     _remember_deleted_revisions,
+    _add_gender_and_sibling_order,
 )
 
 SCHEMA_VERSION = len(MIGRATIONS)

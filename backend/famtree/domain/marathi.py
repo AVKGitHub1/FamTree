@@ -2,7 +2,8 @@
 
 Terms and their compositions follow docs/marathi-relationship-reference.md.
 The mother/father role on each link of the result's path gives the gender of
-everyone between A and B. A's and B's own genders are known only if they are
+everyone between A and B. A's and B's own genders come from their Gender
+detail, if the caller may see it as female or male, or else from being
 recorded as someone's mother or father; when one matters and is not known, the
 male and female forms are listed together, as in "मावस भाऊ/बहीण".
 
@@ -16,11 +17,13 @@ from __future__ import annotations
 from itertools import product
 from typing import Literal
 
+from famtree.domain.attributes import GENDER
 from famtree.domain.model import FamilyGraph, ParentRole
 from famtree.domain.relation import RelationKind, RelationResult
 
 Gender = Literal["m", "f"]
 _GENDER: dict[ParentRole, Gender] = {ParentRole.FATHER: "m", ParentRole.MOTHER: "f"}
+_DETAIL_GENDER: dict[str, Gender] = {"male": "m", "female": "f"}
 
 # A phrase is (text, the genitive ending a possessor before it takes):
 # वडिलांचा भाऊ, वडिलांची बहीण, वडिलांचे काका, वडिलांच्या चुलत भावाचा मुलगा.
@@ -95,6 +98,10 @@ def marathi_names(graph: FamilyGraph, result: RelationResult) -> list[str]:
 
 
 def _recorded_gender(graph: FamilyGraph, person_id: str) -> Gender | None:
+    # The graph is the caller's view: it holds a value only if they may see it.
+    detail = graph.people[person_id].attributes.get(GENDER)
+    if detail is not None and detail.value in _DETAIL_GENDER:
+        return _DETAIL_GENDER[detail.value]
     roles = {link.role for link in graph.child_links_of(person_id)}
     return _GENDER[roles.pop()] if len(roles) == 1 else None
 

@@ -106,6 +106,17 @@ Adding a person, or renaming one, to a name that is already in the tree shows
 a warning with what tells the namesakes apart (birth date, parents and so on).
 It does not stop the save: two people may share a name.
 
+**Gender** is a built-in detail (female, male or other) and, like every other
+detail, starts private. When you add a child to someone recorded as female or
+male, **Mother** or **Father** is chosen for you; you can still change it.
+Marathi relationship names also use it, where you may see it.
+
+**Order of children.** Children of the same parents are drawn by birth date,
+then in the order they were added. Editors can rearrange them: select a child's
+card and use **Move left** or **Move right** in its ⋮ menu or in their details.
+Everyone sees the new order, exports included; children added later go to the
+right of those arranged.
+
 **Snapshots.** Each day the server keeps a snapshot of the tree if it changed;
 the admin can load or delete them under **Admin → Snapshots**, and the latest
 20 are kept. Loading one saves the current tree as a snapshot first, and leaves

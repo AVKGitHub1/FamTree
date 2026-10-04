@@ -359,6 +359,26 @@ def delete_person(
     repo.delete_unused_images(conn)
 
 
+def set_sibling_order(conn: Connection, children: list[str]) -> None:
+    """Arrange a family's children left to right as listed. `children` must be
+    everyone with exactly the same parents, each once; a list that no longer
+    matches the stored tree is refused as stale, so a reload cannot be undone
+    by an order chosen on an older tree."""
+    if len(children) < 2:
+        raise InvalidInput("List at least two children to put in order.")
+    if len(set(children)) != len(children):
+        raise InvalidInput("Each child can be listed only once.")
+    graph = repo.load_graph(conn)
+    for child in children:
+        if child not in graph.people:
+            raise NotFound("That person no longer exists. Reload and try again.")
+    if not graph.parents_of(children[0]):
+        raise InvalidInput("Only children with recorded parents can be put in order.")
+    if sorted(graph.siblings_by_parents(children[0])) != sorted(children):
+        raise StaleRevision("These children or their parents have changed. Reload and try again.")
+    repo.set_sibling_order(conn, children)
+
+
 # --- relationships -----------------------------------------------------------
 
 

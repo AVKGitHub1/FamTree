@@ -54,6 +54,10 @@ export const updatePerson = (
   },
 ) => request<{ ok: true }>("PUT", `/api/people/${q(id)}`, body);
 
+/** Children of the same parents, left to right; every one of them, each once. */
+export const setSiblingOrder = (children: string[]) =>
+  request<{ ok: true }>("PUT", "/api/sibling-order", { children });
+
 export const getDeletionPreview = (id: string) =>
   request<DeletionPreview>("GET", `/api/people/${q(id)}/deletion`);
 

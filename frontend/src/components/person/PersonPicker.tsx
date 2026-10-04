@@ -27,9 +27,12 @@ export function PersonPicker({ label, value, onChange, exclude = [], allowNew = 
   const latest = useRef(0);
 
   const query = text.trim();
-  // Results are shown only for the query they answer, so stale ones never flash.
-  const results = found.query === query ? found.hits : [];
+  // Results can be chosen only for the query they answer. While a newer
+  // search runs, the last answer stays in view, dimmed and not choosable, so
+  // the list does not empty and refill with every keystroke.
   const loading = Boolean(query) && found.query !== query;
+  const results = loading ? [] : found.hits;
+  const stale = loading ? found.hits : [];
 
   useEffect(() => {
     if (!query) return;
@@ -122,6 +125,12 @@ export function PersonPicker({ label, value, onChange, exclude = [], allowNew = 
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => choose(options[i])}
             >
+              <span className="picker__name">{hit.name}</span>
+              {hit.context.length > 0 && <span className="picker__context">{hit.context.join(" · ")}</span>}
+            </li>
+          ))}
+          {stale.map((hit) => (
+            <li key={hit.id} className="is-stale" aria-hidden="true">
               <span className="picker__name">{hit.name}</span>
               {hit.context.length > 0 && <span className="picker__context">{hit.context.join(" · ")}</span>}
             </li>

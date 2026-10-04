@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 
 from famtree.api.deps import get_db, get_state, require
-from famtree.api.schemas import ChangeSetIn, PersonUpdate
+from famtree.api.schemas import ChangeSetIn, PersonUpdate, SiblingOrder
 from famtree.api.state import AppState
 from famtree.domain import changes
 from famtree.domain.visibility import Audience
@@ -40,6 +40,16 @@ def update_person(
             [a.to_domain() for a in body.attributes],
             [d.to_domain() for d in body.definitions],
         )
+    return {"ok": True}
+
+
+@router.put("/sibling-order")
+def set_sibling_order(
+    body: SiblingOrder, _: Viewer = Depends(editor), db: Database = Depends(get_db)
+) -> dict:
+    """Arrange children of the same parents left to right, as listed."""
+    with db.write() as conn:
+        changes.set_sibling_order(conn, body.children)
     return {"ok": True}
 
 

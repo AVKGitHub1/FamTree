@@ -38,11 +38,11 @@ Framework, database, and graph-layout library selection are implementation decis
 ### Snapshots
 
 - Check for a due daily snapshot at startup and every hour, using UTC dates. If the latest daily snapshot was taken or renewed that day, further checks and restarts do nothing until the next UTC day. When due, compare the tree with the latest daily snapshot: save a new snapshot if the family data differs; otherwise renew the latest one, recording when it was first and last seen that way. Revisions and edit timestamps alone do not count as changes. Skip an empty tree and check again the next hour.
-- A snapshot holds family data only: people, attribute values with their visibility, attribute definitions, relationships, and references to the pictures in use. A picture stays stored while any snapshot uses it. Credentials, access codes, sessions, and settings are not part of a snapshot.
+- A snapshot holds family data only: people with the order editors gave children, attribute values with their visibility, attribute definitions, relationships, and references to the pictures in use. A picture stays stored while any snapshot uses it. Credentials, access codes, sessions, and settings are not part of a snapshot.
 - Store snapshots inside the encrypted database. Keep the latest 20, counting both kinds and ordered by when each was last taken; taking another deletes the oldest.
 - The admin can list, delete, and load snapshots. Loading first saves the current tree as a snapshot, then replaces the tree in one transaction. Access codes, sessions, guest access, and the admin password are unchanged. Loaded records get revisions above any a record has had, including those deleted since, so an edit made from a page that still shows an earlier tree is rejected as stale, even for a person the load brings back.
 - The snapshot saved before a load can contain an empty tree, so loading into an empty installation can also be undone. It counts toward the same 20-snapshot limit. Loading the oldest snapshot at that limit can remove its list entry; its family data becomes the current tree.
-- A snapshot taken with a different database schema is listed but cannot be loaded.
+- A migration that changes how the tree is stored converts stored snapshots too. A snapshot taken with a different database schema that was not converted is listed but cannot be loaded.
 - Snapshots supplement backups rather than replace them: they are lost with the database.
 
 ## Access and privacy
@@ -90,7 +90,7 @@ A public viewer code grants the same data access as a guest. Revoking a code rem
 ### People and attributes
 
 - Give each person a stable ID independent of their name. Require a nonempty name, but allow duplicate names. When a new person's name, or a changed name, matches someone already in the tree (ignoring case, accents, and spacing), warn the editor and show what tells the existing people apart; do not block the save.
-- Common optional attributes are birth date, location, profession, and a short description. Support a month-and-day birth date without a birth year; do not insert a fabricated year. An omitted date is distinct from a partially specified date.
+- Common optional attributes are birth date, location, profession, a short description, and gender. Support a month-and-day birth date without a birth year; do not insert a fabricated year. An omitted date is distinct from a partially specified date.
 - Store names and other text as plain text and escape them for display and export.
 - Support reusable custom attribute definitions. Each definition has a stable ID, display label, and value type; editors can create a definition while editing a person, and it then becomes available for future people.
 - Renaming a definition preserves existing values. Reject incompatible type changes while values exist. Individual values keep their own visibility setting.
@@ -103,6 +103,12 @@ A public viewer code grants the same data access as a guest. Revoking a code rem
 - Where the browser can decode the selected image, resize it to at most 1600 pixels on its longest side and convert it to JPEG before upload. The server independently accepts JPEG, PNG, or WebP, limited to 15 MiB and 50 million pixels, and re-encodes it without camera metadata. Apply orientation and flatten transparency onto white. Do not preserve the original uploaded file.
 - Store a JPEG up to 640 pixels on its longest side and a 128 × 128 square thumbnail inside the encrypted database. Cards use the thumbnail; the details panel uses the larger version. Serve pictures through an authorized person's endpoint with browser caching disabled.
 - Export pictures only when **Profile Pic** is selected among the attributes. Use a square crop from the stored larger image; where no permitted picture is available, show initials derived from the public name. This does not distinguish a missing picture from a private one.
+
+### Gender
+
+- Provide one optional built-in **Gender** attribute per person, with the value female, male, or other and the same per-value visibility rule as other details. Custom attributes cannot take this type.
+- Gender only suggests: adding a child to a person recorded as female or male preselects the mother or father role, which the editor can change, and a gender the caller may see settles the form of a Marathi relationship name. It never changes a recorded role, and roles are not written back to it.
+- A tree that already has a custom attribute labeled "Gender" keeps it, with its values, renamed "Gender (custom)".
 
 ### Relationships
 
@@ -122,7 +128,7 @@ The family tree is a graph: multiple parents and spouses mean it is not necessar
 2. For later additions, enter the new person's name and select a parent, child, or spouse connection. When adding from an existing card, preselect that person as the connection target.
 3. Show a matching-name dropdown while typing a related person's name. Include only information the editor may view; use permitted contextual attributes to distinguish people with the same name. Selecting a result links its existing ID and never creates a duplicate implicitly.
 4. If there is no appropriate match, offer an explicit action to create a new related person, with the duplicate-name warning if the name is already in the tree. Create the two people and their relationship in one transaction so neither is left invalid.
-5. For parent/child connections, collect the parent's mother/father role. Clearly identify which person is the parent before saving.
+5. For parent/child connections, collect the parent's mother/father role, preselected from the parent's recorded gender when it is female or male. Clearly identify which person is the parent before saving.
 6. The name is public. Choose public/private visibility for other attributes and relationships; at least one relationship for each newly created person must be public.
 7. Validate and save, then show the updated cards and reciprocal connections.
 
@@ -136,6 +142,7 @@ Edits and deletions must preserve graph validity and required public connections
 - Use rectangles with rounded corners for people. Display the public name and a compact selection of permitted attributes; provide the remaining permitted details on selection.
 - Place parents above children, with spouses and siblings on the same generation row whenever these constraints are compatible.
 - Multiple parents and spouses can create conflicting generation constraints. Prioritize parent-above-child placement and clearly route exceptional connections when all same-row preferences cannot hold. Do not alter family data to simplify the drawing.
+- Order children of the same parents by birth date, then by creation. Editors can rearrange them with **Move left** and **Move right** on a child's card menu or details; this stores a left-to-right order for every child of exactly those parents, without changing anyone's revision. Arranged children keep that order in every caller's view and in exports, even where another order would cross fewer lines; children added later follow them. Saving an order is refused as stale unless it lists exactly the current children of those parents.
 - Keep placement deterministic for the same graph and preserve the selected person and viewport when possible after an edit.
 - Include empty, loading, error, and no-visible-results states. Guests seeing an empty tree cannot create its first person.
 - Offer light, dark, and sepia themes, plus a default **System** choice that follows the device's light/dark preference. Remember the choice in that browser for the site's origin. Exports use a white background regardless of the interface theme.

@@ -11,6 +11,7 @@ import { Header } from "./components/Header";
 import { AddDialog } from "./components/person/AddDialog";
 import { DeleteDialog } from "./components/person/DeleteDialog";
 import { PersonPanel } from "./components/person/PersonPanel";
+import { useSiblingMove } from "./components/person/useSiblingMove";
 import { RelationBanner, RelationResults } from "./components/relation/RelationFlow";
 import { GenerationControls } from "./components/tree/GenerationControls";
 import { Legend } from "./components/tree/Legend";
@@ -18,6 +19,7 @@ import { TreeView, type Occlusion } from "./components/tree/TreeView";
 import type { MenuItem } from "./components/ui/Menu";
 import { cardLines } from "./lib/attributes";
 import { isFull, limitsFor, resolveWindow, visibleRange } from "./lib/generations";
+import { siblingMove } from "./lib/siblings";
 import { useMediaQuery } from "./lib/useMediaQuery";
 import { SessionProvider, useSession } from "./state/session";
 import { ToastProvider } from "./state/toasts";
@@ -168,6 +170,7 @@ function Shell() {
   const onToggle = useCallback((id: string) => dispatch({ type: "toggleSelected", id }), []);
   const onSelect = useCallback((ids: string[]) => dispatch({ type: "setSelection", ids }), []);
 
+  const { move: moveSibling } = useSiblingMove(index);
   const menuFor = useCallback(
     (id: string): MenuItem[] => {
       const items: MenuItem[] = [{ label: "View details", onSelect: () => dispatch({ type: "select", id, openDetails: true }) }];
@@ -178,6 +181,17 @@ function Shell() {
           onSelect: () => dispatch({ type: "openDialog", dialog: { kind: "add", anchorId: id } }),
         });
       }
+      if (can("edit_person") && index) {
+        for (const direction of ["left", "right"] as const) {
+          if (siblingMove(index, id, direction)) {
+            items.push({
+              label: `Move ${direction}`,
+              hint: "among their siblings",
+              onSelect: () => void moveSibling(id, direction),
+            });
+          }
+        }
+      }
       if (can("calculate_relation")) {
         items.push({
           label: "Calculate relation with another card",
@@ -186,7 +200,7 @@ function Shell() {
       }
       return items;
     },
-    [can],
+    [can, index, moveSibling],
   );
 
   const describe = useCallback(

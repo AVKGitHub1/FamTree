@@ -197,8 +197,8 @@ with it.
   alone do not count as changes. The log says `Daily snapshot created` or
   `renewed`. There is no snapshot of every edit or of days the server was off;
   use an operator backup when you need an immediate recovery point.
-- A snapshot holds people, their details and pictures, relationships and
-  attribute definitions. Pictures are not copied: a picture is kept for as
+- A snapshot holds people, their details and pictures, relationships, the
+  order editors gave children and attribute definitions. Pictures are not copied: a picture is kept for as
   long as the tree or any snapshot uses it.
 - Loading a snapshot first saves the current tree as a snapshot ("Saved
   before a load"), so a load can always be undone by loading that one.
@@ -319,8 +319,14 @@ docker compose up -d --build    # rebuilds and restarts; schema migrations run o
 Migrations only move forward. A newer database is refused by an older
 release, so you never silently lose data by downgrading.
 
-An upgrade that changes how the tree itself is stored leaves earlier
-[snapshots](#snapshots) listed but no longer loadable, because they were taken
-with the old layout; keep the backup taken before upgrading to go back that
-far. The first upgrade to a release with snapshots creates the snapshot
-storage and takes the first snapshot as it starts.
+An upgrade that changes how the tree itself is stored converts the earlier
+[snapshots](#snapshots) along with it, so they stay loadable. A snapshot a
+release cannot convert stays listed but cannot be loaded; keep the backup
+taken before upgrading to go back that far. The first upgrade to a release
+with snapshots creates the snapshot storage and takes the first snapshot as
+it starts.
+
+The upgrade that adds the built-in **Gender** detail renames a detail you
+created yourself under that name to "Gender (custom)", in the tree and in
+snapshots, keeping its values. Copy them into the built-in Gender, then delete
+it under **Details**.

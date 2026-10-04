@@ -2,6 +2,8 @@ import pytest
 
 from famtree.domain.attributes import (
     ValueType,
+    custom_type_problem,
+    display_text,
     normalize_name,
     normalize_value,
     type_change_problem,
@@ -65,6 +67,14 @@ class TestValues:
         with pytest.raises(InvalidInput):
             normalize_value(ValueType.NUMBER, True)
         assert normalize_value(ValueType.LONG_TEXT, "a\r\nb  ") == "a\nb"
+
+    def test_gender_is_one_of_three_choices(self):
+        assert normalize_value(ValueType.GENDER, "male") == "male"
+        assert display_text(ValueType.GENDER, "female") == "Female"
+        for wrong in ("Male", "", None, ["male"], {"male": 1}):
+            with pytest.raises(InvalidInput):
+                normalize_value(ValueType.GENDER, wrong)
+        assert custom_type_problem(ValueType.GENDER)
 
 
 class TestTypeChanges:

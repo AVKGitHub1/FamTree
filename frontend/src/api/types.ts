@@ -20,8 +20,10 @@ export interface Session {
   csrf_token: string;
 }
 
-/** "image" is used only by the built-in Profile Pic. */
-export type ValueType = "text" | "long_text" | "date" | "number" | "url" | "image";
+/** "image" is used only by the built-in Profile Pic, "gender" only by the built-in Gender. */
+export type ValueType = "text" | "long_text" | "date" | "number" | "url" | "image" | "gender";
+
+export type Gender = "female" | "male" | "other";
 
 export interface PartialDate {
   year: number | null;

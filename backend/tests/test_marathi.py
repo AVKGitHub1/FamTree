@@ -4,6 +4,7 @@ from builders import GraphBuilder, sample_family
 
 from famtree.domain.marathi import marathi_names
 from famtree.domain.relation import calculate_relation
+from famtree.domain.visibility import Audience, authorize
 
 ROLE = {"m": "father", "f": "mother"}
 
@@ -69,6 +70,22 @@ def test_siblings_and_spouses():
     x, y = g.people("X", "Y")
     g.spouse(x, y)
     assert names(g.build(), x, y) == [["नवरा/बायको", "पती/पत्नी"]]
+
+
+def test_a_visible_gender_detail_settles_the_form():
+    g = GraphBuilder()
+    father = g.person("Father")
+    sister = g.person("Sister", gender=("female", True))
+    brother = g.person("Brother", gender=("male", False))  # private
+    other = g.person("Other", gender=("other", True))
+    for child in (sister, brother, other):
+        g.parent(father, child)
+    graph = g.build()
+    assert names(graph, sister, other) == [["बहीण"]]
+    assert names(graph, brother, other) == [["भाऊ"]]
+    assert names(graph, other, sister) == [["भाऊ/बहीण"]]
+    public = authorize(graph, Audience.PUBLIC)
+    assert names(public, brother, sister) == [["भाऊ/बहीण"]]
 
 
 def test_same_person_has_no_name():

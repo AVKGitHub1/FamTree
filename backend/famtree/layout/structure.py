@@ -138,6 +138,7 @@ def build_component(
             kind=kind,
             links=[link_of[(p, c)] for c in children for p in parents],
             spouse_link=spouse_link_of.get(pair) if kind is FamilyKind.COUPLE else None,
+            arranged=any(graph.people[c].sibling_order is not None for c in children),
         )
         sources = []
         for p in parents:
